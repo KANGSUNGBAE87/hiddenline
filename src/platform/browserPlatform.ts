@@ -1,4 +1,4 @@
-import { noopAnalytics, noopBackend, noopHaptics } from "./noopAdapters";
+import { noopAds, noopAnalytics, noopAuth, noopBackend, noopHaptics, noopPayment } from "./noopAdapters";
 import type { Platform, ShareAdapter, StorageAdapter } from "./types";
 
 function createMemoryStorage(): StorageAdapter {
@@ -42,7 +42,7 @@ function createShare(): ShareAdapter {
         return;
       }
       if (nav?.clipboard) {
-        await nav.clipboard.writeText(`${payload.title}\n${payload.text}`);
+        await nav.clipboard.writeText(payload.title + "\n" + payload.text);
       }
     },
   };
@@ -55,5 +55,8 @@ export function createBrowserPlatform(): Platform {
     analytics: noopAnalytics,
     share: createShare(),
     backend: noopBackend,
+    auth: noopAuth,
+    payment: noopPayment,
+    ads: noopAds,
   };
 }

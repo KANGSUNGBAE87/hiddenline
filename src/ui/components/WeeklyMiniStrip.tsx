@@ -1,12 +1,14 @@
+import type { I18n, MessageKey } from "../../i18n";
 import type { RunRecord } from "../../storage/schema";
 
 type WeeklyMiniStripProps = {
   localDateKey: string;
   records: RunRecord[];
   ariaLabel: string;
+  i18n: I18n;
 };
 
-const dayLabels = ["월", "화", "수", "목", "금", "토", "일"];
+const dayLabelKeys = ["weekday.mon", "weekday.tue", "weekday.wed", "weekday.thu", "weekday.fri", "weekday.sat", "weekday.sun"] satisfies MessageKey[];
 
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
@@ -34,7 +36,7 @@ function bestForDate(records: RunRecord[], dateKey: string): RunRecord | null {
   return candidates.sort((a, b) => Number(b.completed) - Number(a.completed) || (b.score ?? 0) - (a.score ?? 0))[0] ?? null;
 }
 
-export function WeeklyMiniStrip({ localDateKey, records, ariaLabel }: WeeklyMiniStripProps) {
+export function WeeklyMiniStrip({ localDateKey, records, ariaLabel, i18n }: WeeklyMiniStripProps) {
   return (
     <section className="weekly-mini-strip" aria-label={ariaLabel}>
       <div className="weekly-mini-strip__header">
@@ -44,13 +46,14 @@ export function WeeklyMiniStrip({ localDateKey, records, ariaLabel }: WeeklyMini
         {weekKeys(localDateKey).map((dateKey, index) => {
           const record = bestForDate(records, dateKey);
           const state = record?.completed ? "completed" : record ? "attempted" : "empty";
+          const dayLabel = i18n.t(dayLabelKeys[index]);
           return (
             <div
               className={`weekly-mini-tile weekly-mini-tile--${state} ${dateKey === localDateKey ? "weekly-mini-tile--today" : ""}`}
               key={dateKey}
-              aria-label={`${dayLabels[index]} ${state}`}
+              aria-label={`${dayLabel} ${state}`}
             >
-              <span>{dayLabels[index]}</span>
+              <span>{dayLabel}</span>
               <strong>{record?.score ?? (record ? `${Math.round(record.progressMax * 100)}%` : "-")}</strong>
             </div>
           );

@@ -1,4 +1,9 @@
-export type Locale = "ko" | "en";
+export const localeOptions = [
+  { id: "ko", label: "한국어" },
+  { id: "en", label: "English" },
+] as const;
+
+export type Locale = (typeof localeOptions)[number]["id"];
 
 export const fallbackText = "문구를 준비하고 있어요";
 
@@ -18,6 +23,16 @@ export const messages = {
     "home.weeklyMode": "주간 기록",
     "home.practiceDisabled": "다음 단계에서 열립니다",
     "home.weeklyDisabled": "기록 화면 이후 확장합니다",
+    "settings.language": "언어",
+    "settings.language.ko": "한국어",
+    "settings.language.en": "English",
+    "weekday.mon": "월",
+    "weekday.tue": "화",
+    "weekday.wed": "수",
+    "weekday.thu": "목",
+    "weekday.fri": "금",
+    "weekday.sat": "토",
+    "weekday.sun": "일",
     "play.title": "오늘의 숨은선",
     "play.readyHint": "시작점에 손가락을 올려보세요",
     "play.traceHint": "조용히 선을 이어가세요",
@@ -85,6 +100,16 @@ export const messages = {
     "home.weeklyMode": "Weekly",
     "home.practiceDisabled": "Practice Lab opens in the next slice",
     "home.weeklyDisabled": "Weekly Album expands after records",
+    "settings.language": "Language",
+    "settings.language.ko": "한국어",
+    "settings.language.en": "English",
+    "weekday.mon": "Mon",
+    "weekday.tue": "Tue",
+    "weekday.wed": "Wed",
+    "weekday.thu": "Thu",
+    "weekday.fri": "Fri",
+    "weekday.sat": "Sat",
+    "weekday.sun": "Sun",
     "play.title": "Today's Hidden Line",
     "play.readyHint": "Place your finger on the start point",
     "play.traceHint": "Keep following the line calmly",

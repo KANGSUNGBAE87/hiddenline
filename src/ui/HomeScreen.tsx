@@ -33,8 +33,8 @@ export function HomeScreen({ daily, todayBest, previousBest = null, allDailyReco
         <p className="eyebrow">
           {i18n.t("home.dateLabel")} · {daily.localDateKey}
         </p>
-        <h1 id="daily-title">오늘의 숨은선</h1>
-        <p className="subtitle">어제보다 더 정확하고 부드럽게</p>
+        <h1 id="daily-title">{i18n.t("home.title")}</h1>
+        <p className="subtitle">{i18n.t("home.subtitle")}</p>
 
         <DailyArtifact daily={daily} path={path} ariaLabel={i18n.t("home.dailyArtifact")} />
 
@@ -49,7 +49,7 @@ export function HomeScreen({ daily, todayBest, previousBest = null, allDailyReco
           </div>
         </div>
 
-        <WeeklyMiniStrip localDateKey={daily.localDateKey} records={allDailyRecords} ariaLabel={i18n.t("home.weeklyStrip")} />
+        <WeeklyMiniStrip localDateKey={daily.localDateKey} records={allDailyRecords} ariaLabel={i18n.t("home.weeklyStrip")} i18n={i18n} />
 
         <button className="primary-button" type="button" onClick={onStart}>
           {i18n.t("home.startDaily")}

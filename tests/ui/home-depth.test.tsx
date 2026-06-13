@@ -55,4 +55,22 @@ describe("Home depth v2", () => {
     expect(screen.getByText("이전 기록 742")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "오늘의 선 시작하기" })).toBeInTheDocument();
   });
+
+  test("localizes weekly day labels in English", () => {
+    const daily = createDailyContext(new Date("2026-06-13T12:00:00+09:00"));
+
+    render(
+      <HomeScreen
+        daily={daily}
+        todayBest={null}
+        previousBest={null}
+        allDailyRecords={[]}
+        i18n={createI18n("en")}
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Mon")).toBeInTheDocument();
+    expect(screen.queryByText("월")).not.toBeInTheDocument();
+  });
 });

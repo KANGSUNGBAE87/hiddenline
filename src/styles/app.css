@@ -874,3 +874,37 @@ h1 {
     animation-iteration-count: 1 !important;
   }
 }
+
+.language-switcher {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top));
+  right: 12px;
+  z-index: 20;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid rgba(174, 232, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(8, 13, 18, 0.72);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(14px);
+}
+
+.language-switcher button {
+  min-width: 48px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.language-switcher button.is-selected {
+  background: rgba(174, 232, 255, 0.16);
+  color: var(--primary-path-strong);
+}
