@@ -82,7 +82,11 @@ export function pointAtT(path: PathPoint[], t: number): PathPoint {
   return path[path.length - 1];
 }
 
-export function projectPointToPath(point: Point, path: PathPoint[]): PathProjection {
+export function projectPointToPath(
+  point: Point,
+  path: PathPoint[],
+  window?: { minT: number; maxT: number },
+): PathProjection {
   if (path.length < 2) {
     const fallback = path[0] ?? { x: 0, y: 0, t: 0, distance: 0 };
     return {
@@ -94,10 +98,14 @@ export function projectPointToPath(point: Point, path: PathPoint[]): PathProject
   }
 
   let best: PathProjection | null = null;
+  const minT = window ? clamp(window.minT, 0, 1) : 0;
+  const maxT = window ? clamp(window.maxT, 0, 1) : 1;
 
   for (let index = 1; index < path.length; index += 1) {
     const start = path[index - 1];
     const end = path[index];
+    if (end.t < minT || start.t > maxT) continue;
+
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const lengthSquared = dx * dx + dy * dy || 1;
@@ -121,7 +129,7 @@ export function projectPointToPath(point: Point, path: PathPoint[]): PathProject
     }
   }
 
-  return best!;
+  return best ?? projectPointToPath(point, path);
 }
 
 function orientation(a: Point, b: Point, c: Point): number {

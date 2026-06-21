@@ -36,11 +36,18 @@ function emptyMetrics(): RunMetrics {
   };
 }
 
-function calculateMetrics(samples: Sample[], startedAtMs: number | null, endedAtMs: number | null, warningPeak: number, warningCount: number): RunMetrics {
+function calculateMetrics(
+  samples: Sample[],
+  startedAtMs: number | null,
+  endedAtMs: number | null,
+  warningPeak: number,
+  warningCount: number,
+  failDistancePx: number,
+): RunMetrics {
   const accuracy =
     samples.length === 0
       ? 0
-      : samples.reduce((total, sample) => total + (1 - Math.min(1, sample.distancePx / GAMEPLAY_DEFAULTS.failDistancePx)), 0) /
+      : samples.reduce((total, sample) => total + (1 - Math.min(1, sample.distancePx / failDistancePx)), 0) /
         samples.length;
   const turns: number[] = [];
 
@@ -102,20 +109,22 @@ export function createSessionMachine(path: GeneratedPath) {
     ) {
       status = "success";
       endedAtMs = timeMs;
-      const metrics = calculateMetrics(samples, startedAtMs, endedAtMs, warningPeak, warningCount);
+      const metrics = calculateMetrics(samples, startedAtMs, endedAtMs, warningPeak, warningCount, path.rules.failDistancePx);
       score = calculateOfficialScore({
         completed: true,
         accuracy: metrics.accuracy,
         smoothness: metrics.smoothness,
         durationMs: metrics.durationMs ?? 1,
         targetDurationMs: Math.max(1, path.totalLength / 0.1),
-        warningPenalty: warningPeak + warningCount * 12,
+        warningPeak,
+        warningCount,
+        progressMax,
       });
     }
   }
 
   function getSnapshot(): SessionSnapshot {
-    const metrics = calculateMetrics(samples, startedAtMs, endedAtMs, warningPeak, warningCount);
+    const metrics = calculateMetrics(samples, startedAtMs, endedAtMs, warningPeak, warningCount, path.rules.failDistancePx);
     return {
       status,
       progressT,
@@ -184,10 +193,10 @@ export function createSessionMachine(path: GeneratedPath) {
     } else if (judgment.warningLevel === "warning") {
       warningMeter = Math.min(
         GAMEPLAY_DEFAULTS.warningMeterMax,
-        warningMeter + GAMEPLAY_DEFAULTS.warningIncreaseRatePerSecond * Math.max(0.016, dt),
+        warningMeter + path.rules.warningIncreaseRatePerSecond * Math.max(0.016, dt),
       );
     } else {
-      warningMeter = Math.max(0, warningMeter - GAMEPLAY_DEFAULTS.warningRecoverRatePerSecond * Math.max(0.016, dt));
+      warningMeter = Math.max(0, warningMeter - path.rules.warningRecoverRatePerSecond * Math.max(0.016, dt));
     }
 
     warningPeak = Math.max(warningPeak, warningMeter);
@@ -234,7 +243,7 @@ export function createSessionMachine(path: GeneratedPath) {
       return;
     }
 
-    if (timeMs - lastAcceptedAtMs > GAMEPLAY_DEFAULTS.idleLimitMs) {
+    if (timeMs - lastAcceptedAtMs > path.rules.idleLimitMs) {
       fail("stalled", timeMs);
     }
   }

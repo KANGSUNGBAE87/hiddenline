@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600" role="img" aria-label="숨은선">
+  <rect width="600" height="600" fill="#101820"/>
+  <circle cx="300" cy="300" r="218" fill="#162636" stroke="#5FBDF2" stroke-width="10"/>
+  <path d="M146 398C210 292 270 376 318 266C356 180 420 192 462 126" fill="none" stroke="#D6F5FF" stroke-width="28" stroke-linecap="round"/>
+  <path d="M146 398C210 292 270 376 318 266C356 180 420 192 462 126" fill="none" stroke="#5FBDF2" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="146" cy="398" r="34" fill="#D6F5FF"/>
+  <circle cx="146" cy="398" r="18" fill="#5FBDF2"/>
+  <path d="M448 126h44M470 104v44" stroke="#D6F5FF" stroke-width="14" stroke-linecap="round"/>
+</svg>

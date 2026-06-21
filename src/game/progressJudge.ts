@@ -23,9 +23,9 @@ export type ProgressJudgmentInput = {
   timeMs: number;
 };
 
-function classifyDistance(distancePx: number): WarningLevel {
-  if (distancePx <= GAMEPLAY_DEFAULTS.pathWidthPx) return "safe";
-  if (distancePx <= GAMEPLAY_DEFAULTS.failDistancePx) return "warning";
+function classifyDistance(distancePx: number, path: GeneratedPath): WarningLevel {
+  if (distancePx <= path.rules.pathWidthPx) return "safe";
+  if (distancePx <= path.rules.failDistancePx) return "warning";
   return "fail";
 }
 
@@ -47,15 +47,25 @@ export function getCoverageRatio(coveredSegments: Set<number>): number {
 }
 
 export function judgeProgressSample(input: ProgressJudgmentInput): ProgressJudgment {
-  const projection = projectPointToPath(input.point, input.path.points);
-  const warningLevel = classifyDistance(projection.distance);
-  const progressDelta = projection.progressT - input.previousProgressT;
   const dtSeconds = Math.max(0.016, (input.timeMs - input.previousTimeMs) / 1000);
   const allowedJump = Math.max(
     GAMEPLAY_DEFAULTS.maxProgressJumpPerFrame,
     GAMEPLAY_DEFAULTS.maxProgressJumpPerSecond * dtSeconds,
   );
-  const suspiciousJump = progressDelta > allowedJump;
+  const projectionWindow = {
+    minT: input.previousProgressT - GAMEPLAY_DEFAULTS.allowedBacktrackT,
+    maxT: input.previousProgressT + Math.max(allowedJump, input.path.rules.forwardPreviewT * 3, 0.04),
+  };
+  const projection = projectPointToPath(input.point, input.path.points, projectionWindow);
+  const fullProjection = projectPointToPath(input.point, input.path.points);
+  const warningLevel = classifyDistance(projection.distance, input.path);
+  const progressDelta = projection.progressT - input.previousProgressT;
+  const fullProgressDelta = fullProjection.progressT - input.previousProgressT;
+  const suspiciousJump =
+    warningLevel === "fail" &&
+    fullProjection.distance <= input.path.rules.failDistancePx &&
+    fullProgressDelta > allowedJump &&
+    fullProjection.progressT > projectionWindow.maxT;
   const tooFarBack = progressDelta < -GAMEPLAY_DEFAULTS.allowedBacktrackT;
   const accepted = warningLevel !== "fail" && !suspiciousJump && !tooFarBack;
   const progressT = accepted ? Math.max(input.previousProgressT, projection.progressT) : input.previousProgressT;

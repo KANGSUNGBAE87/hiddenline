@@ -43,7 +43,7 @@ test("dev-only success helper reaches Result screen", async ({ page }) => {
   await page.goto("/?qa=success");
 
   await expect(page.getByRole("heading", { name: "오늘의 선을 완주했어요" })).toBeVisible();
-  await expect(page.getByText("점수")).toBeVisible();
+  await expect(page.getByText("점수", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "다시 도전" })).toBeVisible();
 });
 

@@ -1,4 +1,5 @@
 import { GAMEPLAY_DEFAULTS } from "./config";
+import { createMeasurementBreakdown, scoreFromMeasurement } from "./measurement";
 import { clamp } from "./pathGeometry";
 
 export type ScoreInput = {
@@ -7,6 +8,9 @@ export type ScoreInput = {
   durationMs: number;
   targetDurationMs: number;
   warningPenalty?: number;
+  warningPeak?: number;
+  warningCount?: number;
+  progressMax?: number;
 };
 
 export type OfficialScoreInput = ScoreInput & {
@@ -14,14 +18,20 @@ export type OfficialScoreInput = ScoreInput & {
 };
 
 export function calculateScore(input: ScoreInput): number {
-  const accuracy = clamp(input.accuracy, 0, 1);
-  const smoothness = clamp(input.smoothness, 0, 1);
-  const timeScore = clamp(input.targetDurationMs / Math.max(1, input.durationMs), 0, 1);
-  const warningPenalty = Math.max(0, input.warningPenalty ?? 0);
-  const raw =
-    GAMEPLAY_DEFAULTS.scoreMax * (accuracy * 0.6 + smoothness * 0.25 + timeScore * 0.15) - warningPenalty;
+  const warningPeak = input.warningPeak ?? clamp(input.warningPenalty ?? 0, 0, GAMEPLAY_DEFAULTS.warningMeterMax);
+  const breakdown = createMeasurementBreakdown(
+    {
+      accuracy: input.accuracy,
+      smoothness: input.smoothness,
+      durationMs: input.durationMs,
+      warningPeak,
+      warningCount: input.warningCount ?? 0,
+    },
+    input.progressMax ?? 1,
+    input.targetDurationMs,
+  );
 
-  return Math.round(clamp(raw, 0, GAMEPLAY_DEFAULTS.scoreMax));
+  return scoreFromMeasurement(breakdown, GAMEPLAY_DEFAULTS.scoreMax);
 }
 
 export function calculateOfficialScore(input: OfficialScoreInput): number | null {

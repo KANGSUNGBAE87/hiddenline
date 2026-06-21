@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { GAMEPLAY_DEFAULTS } from "../../src/game/config";
 import { generatePath } from "../../src/game/pathGenerator";
+import { annotatePolyline } from "../../src/game/pathGeometry";
 import { judgeProgressSample, getCoverageRatio } from "../../src/game/progressJudge";
+import type { GeneratedPath, Point } from "../../src/game/types";
 
 const context = {
   localDateKey: "2026-06-13",
@@ -11,6 +13,30 @@ const context = {
   difficulty: "normal" as const,
 };
 const path = generatePath({ ...context, viewport: { width: 390, height: 560 } });
+
+function createCrossingPath(points: Point[]): GeneratedPath {
+  const annotated = annotatePolyline(points);
+  return {
+    seed: "crossing-progress-test",
+    generatorVersion: "daily-v1",
+    lineType: "curve",
+    courseLengthId: "longRun",
+    overlapDifficultyId: "complex",
+    selfIntersectionCount: 1,
+    generatorProfileId: "curve-control-v1",
+    difficulty: "normal",
+    lineDifficulty: "hard",
+    visibilityLevel: "normal",
+    complexityScore: 1,
+    viewport: { width: 390, height: 560 },
+    start: annotated[0],
+    end: annotated[annotated.length - 1],
+    points: annotated,
+    totalLength: annotated[annotated.length - 1].distance,
+    usedFallback: false,
+    rules: path.rules,
+  };
+}
 
 describe("progress judge", () => {
   test("touch near the current path advances progressT", () => {
@@ -68,5 +94,30 @@ describe("progress judge", () => {
     });
 
     expect(judgment.warningLevel).toBe("fail");
+  });
+
+  test("self-crossing paths judge against the current progress window", () => {
+    const crossingPath = createCrossingPath([
+      { x: 48, y: 120 },
+      { x: 180, y: 120 },
+      { x: 320, y: 120 },
+      { x: 180, y: 120 },
+      { x: 180, y: 260 },
+      { x: 320, y: 260 },
+    ]);
+    const laterCrossing = crossingPath.points[3];
+
+    const judgment = judgeProgressSample({
+      point: laterCrossing,
+      path: crossingPath,
+      previousProgressT: Math.max(0, laterCrossing.t - 0.01),
+      coveredSegments: new Set(),
+      previousTimeMs: 100,
+      timeMs: 160,
+    });
+
+    expect(judgment.accepted).toBe(true);
+    expect(judgment.projectedProgressT).toBeGreaterThan(0.5);
+    expect(judgment.progressT).toBeGreaterThan(0.5);
   });
 });

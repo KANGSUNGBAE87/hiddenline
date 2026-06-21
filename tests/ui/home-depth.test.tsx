@@ -1,76 +1,90 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { createDailyContext } from "../../src/game/daily";
+import { createDailyPackContext, getDailyCourseContext } from "../../src/game/dailyPack";
+import type { CourseLengthId, OverlapDifficultyId, VisibilityLevelId } from "../../src/game/types";
 import { createI18n } from "../../src/i18n";
-import type { RunRecord } from "../../src/storage/schema";
 import { HomeScreen } from "../../src/ui/HomeScreen";
 
-function createRecord(overrides: Partial<RunRecord>): RunRecord {
-  const now = "2026-06-13T00:00:00.000Z";
-  return {
-    schemaVersion: 1,
-    id: "daily-record",
-    mode: "daily",
-    localDateKey: "2026-06-13",
-    timezoneOffset: -540,
-    seed: "hiddenline-daily:2026-06-13:daily-v1",
-    generatorVersion: "daily-v1",
-    difficulty: "normal",
-    completed: true,
-    status: "success",
-    score: 812,
-    progressMax: 1,
-    accuracy: 0.91,
-    smoothness: 0.86,
-    durationMs: 24_000,
-    failReason: null,
-    createdAt: now,
-    updatedAt: now,
-    ...overrides,
-  };
+function renderHome(overrides: Partial<{
+  courseLengthId: CourseLengthId;
+  overlapDifficultyId: OverlapDifficultyId;
+  visibilityLevel: VisibilityLevelId;
+  onSelectCourseLength: (value: CourseLengthId) => void;
+  onSelectOverlapDifficulty: (value: OverlapDifficultyId) => void;
+  onSelectVisibilityLevel: (value: VisibilityLevelId) => void;
+}> = {}) {
+  const daily = createDailyContext(new Date("2026-06-21T12:00:00+09:00"));
+  const dailyPack = createDailyPackContext(daily);
+  const courseLengthId = overrides.courseLengthId ?? "basic";
+  const overlapDifficultyId = overrides.overlapDifficultyId ?? "complex";
+  const visibilityLevel = overrides.visibilityLevel ?? "normal";
+  const selectedLine = getDailyCourseContext(dailyPack, courseLengthId, overlapDifficultyId, visibilityLevel);
+
+  return render(
+    <HomeScreen
+      dailyPack={dailyPack}
+      courseLengthId={courseLengthId}
+      overlapDifficultyId={overlapDifficultyId}
+      selectedLine={selectedLine}
+      todayBest={null}
+      previousBest={null}
+      allDailyRecords={[]}
+      i18n={createI18n("ko")}
+      onSelectCourseLength={overrides.onSelectCourseLength ?? vi.fn()}
+      onSelectOverlapDifficulty={overrides.onSelectOverlapDifficulty ?? vi.fn()}
+      onSelectVisibilityLevel={overrides.onSelectVisibilityLevel ?? vi.fn()}
+      onStart={vi.fn()}
+    />,
+  );
 }
 
-describe("Home depth v2", () => {
-  test("shows a daily artifact, compact weekly strip, and previous record context", () => {
-    const daily = createDailyContext(new Date("2026-06-13T12:00:00+09:00"));
-
-    render(
-      <HomeScreen
-        daily={daily}
-        todayBest={createRecord({ score: 812 })}
-        previousBest={createRecord({ id: "previous", localDateKey: "2026-06-12", score: 742 })}
-        allDailyRecords={[
-          createRecord({ id: "monday", localDateKey: "2026-06-08", score: 700 }),
-          createRecord({ id: "today", localDateKey: "2026-06-13", score: 812 }),
-        ]}
-        i18n={createI18n("ko")}
-        onStart={vi.fn()}
-      />,
-    );
+describe("Home course/overlap/sight layout", () => {
+  test("centers the selected line preview and summarizes the three play axes", () => {
+    renderHome();
 
     expect(screen.getByRole("img", { name: "오늘의 선 미리보기" })).toBeInTheDocument();
-    expect(screen.getByLabelText("이번 주 기록")).toBeInTheDocument();
-    expect(screen.getByText("오늘 최고 기록")).toBeInTheDocument();
-    expect(screen.getAllByText("812").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("이전 기록 742")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "오늘의 선 시작하기" })).toBeInTheDocument();
+    expect(screen.getByText("기본 코스 · 겹침 Normal · 시야 보통")).toBeInTheDocument();
+    expect(screen.queryByText(/5개 난이도/)).not.toBeInTheDocument();
+    expect(screen.queryByText("공식 프리셋")).not.toBeInTheDocument();
   });
 
-  test("localizes weekly day labels in English", () => {
-    const daily = createDailyContext(new Date("2026-06-13T12:00:00+09:00"));
+  test("shows course length, overlap difficulty, and sight as separate centered controls", async () => {
+    const user = userEvent.setup();
+    const onSelectCourseLength = vi.fn();
+    const onSelectOverlapDifficulty = vi.fn();
+    const onSelectVisibilityLevel = vi.fn();
+    renderHome({ onSelectCourseLength, onSelectOverlapDifficulty, onSelectVisibilityLevel });
 
-    render(
-      <HomeScreen
-        daily={daily}
-        todayBest={null}
-        previousBest={null}
-        allDailyRecords={[]}
-        i18n={createI18n("en")}
-        onStart={vi.fn()}
-      />,
-    );
+    await user.click(screen.getByRole("button", { name: "긴 코스" }));
+    await user.click(screen.getByRole("button", { name: "Normal" }));
+    await user.click(screen.getByRole("button", { name: "좁음" }));
 
-    expect(screen.getByText("Mon")).toBeInTheDocument();
-    expect(screen.queryByText("월")).not.toBeInTheDocument();
+    expect(onSelectCourseLength).toHaveBeenCalledWith("long");
+    expect(onSelectOverlapDifficulty).toHaveBeenCalledWith("complex");
+    expect(onSelectVisibilityLevel).toHaveBeenCalledWith("hard");
+  });
+
+  test("shows overlap difficulty as Intro to Expert with a 3 plus 2 layout", () => {
+    renderHome();
+
+    const overlapGroup = screen.getByRole("group", { name: "겹침난도" });
+    const overlapButtons = within(overlapGroup).getAllByRole("button");
+
+    expect(overlapButtons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Intro",
+      "Easy",
+      "Normal",
+      "Hard",
+      "Expert",
+    ]);
+    expect(within(overlapGroup).getByText("0")).toBeInTheDocument();
+    expect(within(overlapGroup).getByText("1-2회")).toBeInTheDocument();
+    expect(within(overlapGroup).getByText("3-4회")).toBeInTheDocument();
+    expect(within(overlapGroup).getByText("5-6회")).toBeInTheDocument();
+    expect(within(overlapGroup).getByText("7회 이상")).toBeInTheDocument();
+    expect(overlapGroup.querySelector(".choice-grid--five")).toBeInTheDocument();
   });
 });

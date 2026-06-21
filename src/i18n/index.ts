@@ -13,8 +13,9 @@ export function createI18n(locale: Locale = "ko"): I18n {
   return {
     locale,
     t(key) {
-      const messageKey = key as MessageKey;
-      return messages[locale][messageKey] ?? messages.ko[messageKey] ?? fallbackText;
+      const table = messages[locale] as Record<string, string>;
+      const fallbackTable = messages.ko as Record<string, string>;
+      return table[key as string] ?? fallbackTable[key as string] ?? fallbackText;
     },
   };
 }

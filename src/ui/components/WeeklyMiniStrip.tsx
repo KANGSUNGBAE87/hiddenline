@@ -32,7 +32,7 @@ function weekKeys(localDateKey: string): string[] {
 }
 
 function bestForDate(records: RunRecord[], dateKey: string): RunRecord | null {
-  const candidates = records.filter((record) => record.localDateKey === dateKey);
+  const candidates = records.filter((record) => record.localDateKey === dateKey && record.lineType === "main");
   return candidates.sort((a, b) => Number(b.completed) - Number(a.completed) || (b.score ?? 0) - (a.score ?? 0))[0] ?? null;
 }
 

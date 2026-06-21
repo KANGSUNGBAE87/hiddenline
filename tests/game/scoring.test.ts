@@ -3,8 +3,17 @@ import { calculateScore, calculateOfficialScore } from "../../src/game/scoring";
 
 describe("scoring", () => {
   test("score clamps 0-1000", () => {
-    expect(calculateScore({ accuracy: 2, smoothness: 2, durationMs: 100, targetDurationMs: 1000 })).toBe(1000);
-    expect(calculateScore({ accuracy: -1, smoothness: -1, durationMs: 1_000_000, targetDurationMs: 100 })).toBe(0);
+    expect(calculateScore({ accuracy: 2, smoothness: 2, durationMs: 1000, targetDurationMs: 1000 })).toBe(1000);
+    expect(
+      calculateScore({
+        accuracy: -1,
+        smoothness: -1,
+        durationMs: 1_000_000,
+        targetDurationMs: 100,
+        progressMax: 0,
+        warningPeak: 100,
+      }),
+    ).toBe(0);
   });
 
   test("failed run returns no official score", () => {
@@ -24,6 +33,20 @@ describe("scoring", () => {
     const slow = calculateScore({ accuracy: 1, smoothness: 1, durationMs: 2000, targetDurationMs: 1000 });
 
     expect(lowAccuracy).toBeLessThan(slow);
+  });
+
+  test("score follows the same five-part measurement formula shown to users", () => {
+    expect(
+      calculateScore({
+        accuracy: 0.5,
+        smoothness: 0.5,
+        durationMs: 1000,
+        targetDurationMs: 1000,
+        progressMax: 0.5,
+        warningPeak: 0,
+        warningCount: 0,
+      }),
+    ).toBe(625);
   });
 
   test("warning penalty lowers a completed score", () => {

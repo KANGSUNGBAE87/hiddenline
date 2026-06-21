@@ -208,8 +208,13 @@ function drawStartMarker(context: CanvasRenderingContext2D, point: Point) {
   context.restore();
 }
 
-function drawFocusLens(context: CanvasRenderingContext2D, point: Point, status: SessionSnapshot["status"], warningMeter: number) {
-  const radius = VISIBILITY_DEFAULTS.touchFocusRadius;
+function drawFocusLens(
+  context: CanvasRenderingContext2D,
+  point: Point,
+  status: SessionSnapshot["status"],
+  warningMeter: number,
+  radius: number,
+) {
   const warning = status === "warning";
   const color = warning ? "232, 183, 91" : "174, 232, 255";
   const ringOpacity = warning ? 0.3 + Math.min(0.48, warningMeter / 170) : 0.2;
@@ -292,11 +297,11 @@ export function CanvasGame({
     const focus = snapshot.lastTouch ?? path.start;
 
     if (isRevealing) {
-      drawFocusLens(context, focus, snapshot.status, snapshot.warningMeter);
+      drawFocusLens(context, focus, snapshot.status, snapshot.warningMeter, path.rules.touchFocusRadiusPx);
 
       context.save();
       context.beginPath();
-      context.arc(focus.x, focus.y, VISIBILITY_DEFAULTS.touchFocusRadius, 0, Math.PI * 2);
+      context.arc(focus.x, focus.y, path.rules.revealRadiusPx, 0, Math.PI * 2);
       context.clip();
 
       strokeSegment(
@@ -313,7 +318,7 @@ export function CanvasGame({
         context,
         path.points,
         snapshot.progressT,
-        Math.min(1, snapshot.progressT + VISIBILITY_DEFAULTS.forwardPreviewT),
+        Math.min(1, snapshot.progressT + path.rules.forwardPreviewT),
         "#31404a",
         VISIBILITY_DEFAULTS.forwardPreviewOpacity,
         VISIBILITY_DEFAULTS.pathStrokeWidth,
@@ -325,7 +330,7 @@ export function CanvasGame({
         context,
         path.points,
         Math.max(0, snapshot.progressT - VISIBILITY_DEFAULTS.activeBacktrackT),
-        Math.min(1, snapshot.progressT + VISIBILITY_DEFAULTS.forwardPreviewT),
+        Math.min(1, snapshot.progressT + path.rules.forwardPreviewT),
         snapshot.status === "warning" ? "#e8b75b" : "#aee8ff",
         VISIBILITY_DEFAULTS.revealedPathOpacity,
         VISIBILITY_DEFAULTS.pathStrokeWidth,

@@ -14,6 +14,7 @@ export type RunFeedbackMessageKey =
   | "feedback.skipCoaching"
   | "feedback.liftedCoaching"
   | "feedback.stalledCoaching"
+  | "feedback.abortedCoaching"
   | "feedback.defaultFailedCoaching"
   | "feedback.chipNewBest"
   | "feedback.chipSmooth"
@@ -101,6 +102,15 @@ export function deriveRunFeedback(record: RunRecord, previousBest?: RunRecord | 
       title: "feedback.learningTitle",
       coachingLine: "feedback.stalledCoaching",
       chips: ["feedback.chipKeepMoving"],
+    };
+  }
+
+  if (record.failReason === "aborted") {
+    return {
+      tone: "learning",
+      title: "feedback.learningTitle",
+      coachingLine: "feedback.abortedCoaching",
+      chips: ["feedback.chipStayWithLine"],
     };
   }
 
