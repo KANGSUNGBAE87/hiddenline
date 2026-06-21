@@ -295,6 +295,7 @@ export function CanvasGame({
 
     const isRevealing = snapshot.status !== "ready" && snapshot.lastTouch;
     const focus = snapshot.lastTouch ?? path.start;
+    const visibleForwardPreviewT = path.rules.forwardPreviewT * VISIBILITY_DEFAULTS.forwardPreviewRenderMultiplier;
 
     if (isRevealing) {
       drawFocusLens(context, focus, snapshot.status, snapshot.warningMeter, path.rules.touchFocusRadiusPx);
@@ -318,7 +319,7 @@ export function CanvasGame({
         context,
         path.points,
         snapshot.progressT,
-        Math.min(1, snapshot.progressT + path.rules.forwardPreviewT),
+        Math.min(1, snapshot.progressT + visibleForwardPreviewT),
         "#31404a",
         VISIBILITY_DEFAULTS.forwardPreviewOpacity,
         VISIBILITY_DEFAULTS.pathStrokeWidth,
@@ -330,7 +331,7 @@ export function CanvasGame({
         context,
         path.points,
         Math.max(0, snapshot.progressT - VISIBILITY_DEFAULTS.activeBacktrackT),
-        Math.min(1, snapshot.progressT + path.rules.forwardPreviewT),
+        Math.min(1, snapshot.progressT + visibleForwardPreviewT),
         snapshot.status === "warning" ? "#e8b75b" : "#aee8ff",
         VISIBILITY_DEFAULTS.revealedPathOpacity,
         VISIBILITY_DEFAULTS.pathStrokeWidth,

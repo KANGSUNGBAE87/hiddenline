@@ -165,8 +165,8 @@ export const VISIBILITY_LEVELS: Record<
   easy: {
     pathWidthPx: 38,
     failDistancePx: 60,
-    revealRadiusPx: 124,
-    touchFocusRadiusPx: 70,
+    revealRadiusPx: 248,
+    touchFocusRadiusPx: 140,
     forwardPreviewT: 0.018,
     idleLimitMs: 1800,
     minTurnRadiusPx: 120,
@@ -176,9 +176,9 @@ export const VISIBILITY_LEVELS: Record<
   },
   normal: {
     pathWidthPx: 28,
-    revealRadiusPx: 88,
+    revealRadiusPx: 176,
     failDistancePx: 44,
-    touchFocusRadiusPx: 54,
+    touchFocusRadiusPx: 108,
     forwardPreviewT: 0.011,
     idleLimitMs: 1350,
     minTurnRadiusPx: 90,
@@ -189,8 +189,8 @@ export const VISIBILITY_LEVELS: Record<
   hard: {
     pathWidthPx: 18,
     failDistancePx: 30,
-    revealRadiusPx: 62,
-    touchFocusRadiusPx: 42,
+    revealRadiusPx: 124,
+    touchFocusRadiusPx: 84,
     forwardPreviewT: 0.006,
     idleLimitMs: 850,
     minTurnRadiusPx: 68,
@@ -219,8 +219,8 @@ export const DIFFICULTIES: Record<
   expert: {
     pathWidthPx: 16,
     failDistancePx: 30,
-    revealRadiusPx: 68,
-    touchFocusRadiusPx: 44,
+    revealRadiusPx: 136,
+    touchFocusRadiusPx: 88,
     forwardPreviewT: 0.007,
     idleLimitMs: 750,
     minTurnRadiusPx: 52,
@@ -231,12 +231,13 @@ export const DIFFICULTIES: Record<
 };
 
 export const VISIBILITY_DEFAULTS = {
-  revealRadiusPx: 64,
-  touchFocusRadius: 58,
-  activeBacktrackT: 0.012,
-  passedTrailT: 0.032,
+  revealRadiusPx: 128,
+  touchFocusRadius: 116,
+  activeBacktrackT: 0.024,
+  passedTrailT: 0.064,
   forwardPreviewT: 0.014,
-  pathStrokeWidth: 2.8,
+  forwardPreviewRenderMultiplier: 2,
+  pathStrokeWidth: 5.6,
   revealedPathOpacity: 0.86,
   hiddenPathOpacity: 0,
   passedTrailOpacity: 0.09,
