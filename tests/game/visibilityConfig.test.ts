@@ -12,7 +12,7 @@ describe("visibility tuning", () => {
     expect(VISIBILITY_LEVELS.normal.pathWidthPx).toBe(28);
     expect(VISIBILITY_LEVELS.normal.failDistancePx).toBe(44);
     expect(VISIBILITY_DEFAULTS.touchFocusRadius).toBe(116);
-    expect(VISIBILITY_DEFAULTS.pathStrokeWidth).toBe(5.6);
+    expect(VISIBILITY_DEFAULTS.pathStrokeWidth).toBe(2.8);
     expect(VISIBILITY_DEFAULTS.activeBacktrackT).toBe(0.024);
     expect(VISIBILITY_DEFAULTS.forwardPreviewRenderMultiplier).toBe(2);
     expect(VISIBILITY_DEFAULTS.forwardPreviewOpacity).toBeLessThanOrEqual(0.08);

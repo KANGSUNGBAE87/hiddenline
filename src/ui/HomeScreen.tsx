@@ -109,7 +109,16 @@ export function HomeScreen({
   onSelectVisibilityLevel,
   onStart,
 }: HomeScreenProps) {
-  const path = useMemo(() => generatePath({ ...selectedLine, viewport: createPreviewViewport() }), [selectedLine]);
+  const previewLine = useMemo(
+    () => ({
+      ...selectedLine,
+      localDateKey: "preview-example",
+      dailyPackId: "preview-example",
+      seed: `hiddenline-preview-example:${courseLengthId}:${overlapDifficultyId}:${selectedLine.visibilityLevel}`,
+    }),
+    [courseLengthId, overlapDifficultyId, selectedLine],
+  );
+  const path = useMemo(() => generatePath({ ...previewLine, viewport: createPreviewViewport() }), [previewLine]);
   const weekDayKeys = useMemo(() => createWeekDateKeys(dailyPack.localDateKey), [dailyPack.localDateKey]);
   const matchingRecords = useMemo(
     () => allDailyRecords.filter(

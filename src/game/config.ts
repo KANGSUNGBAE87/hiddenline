@@ -237,7 +237,7 @@ export const VISIBILITY_DEFAULTS = {
   passedTrailT: 0.064,
   forwardPreviewT: 0.014,
   forwardPreviewRenderMultiplier: 2,
-  pathStrokeWidth: 5.6,
+  pathStrokeWidth: 2.8,
   revealedPathOpacity: 0.86,
   hiddenPathOpacity: 0,
   passedTrailOpacity: 0.09,

@@ -7,14 +7,37 @@ type DailyArtifactProps = {
   badgeLabel: string;
 };
 
-function createPathD(path: GeneratedPath): string {
-  const [first, ...rest] = path.points;
+export function createSmoothPathD(points: GeneratedPath["points"]): string {
+  const [first] = points;
   if (!first) return "";
-  return `M ${first.x.toFixed(2)} ${first.y.toFixed(2)} ${rest.map((point) => `L ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ")}`;
+  if (points.length === 1) return `M ${first.x.toFixed(2)} ${first.y.toFixed(2)}`;
+
+  if (points.length === 2) {
+    const second = points[1];
+    const controlX = (first.x + second.x) / 2;
+    const controlY = (first.y + second.y) / 2;
+    return `M ${first.x.toFixed(2)} ${first.y.toFixed(2)} Q ${controlX.toFixed(2)} ${controlY.toFixed(2)} ${second.x.toFixed(2)} ${second.y.toFixed(2)}`;
+  }
+
+  const commands = [`M ${first.x.toFixed(2)} ${first.y.toFixed(2)}`];
+
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    const midX = (current.x + next.x) / 2;
+    const midY = (current.y + next.y) / 2;
+    commands.push(`Q ${current.x.toFixed(2)} ${current.y.toFixed(2)} ${midX.toFixed(2)} ${midY.toFixed(2)}`);
+  }
+
+  const previous = points[points.length - 2];
+  const last = points[points.length - 1];
+  commands.push(`Q ${previous.x.toFixed(2)} ${previous.y.toFixed(2)} ${last.x.toFixed(2)} ${last.y.toFixed(2)}`);
+
+  return commands.join(" ");
 }
 
 export function DailyArtifact({ path, ariaLabel, badgeLabel }: DailyArtifactProps) {
-  const pathD = createPathD(path);
+  const pathD = createSmoothPathD(path.points);
 
   return (
     <figure className="daily-artifact">

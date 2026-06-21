@@ -69,9 +69,25 @@ function strokeSegment(
   context.lineJoin = "round";
   context.beginPath();
   context.moveTo(points[0].x, points[0].y);
-  for (const point of points.slice(1)) {
-    context.lineTo(point.x, point.y);
+
+  if (points.length === 2) {
+    const controlX = (points[0].x + points[1].x) / 2;
+    const controlY = (points[0].y + points[1].y) / 2;
+    context.quadraticCurveTo(controlX, controlY, points[1].x, points[1].y);
+  } else {
+    for (let index = 1; index < points.length - 1; index += 1) {
+      const current = points[index];
+      const next = points[index + 1];
+      const midX = (current.x + next.x) / 2;
+      const midY = (current.y + next.y) / 2;
+      context.quadraticCurveTo(current.x, current.y, midX, midY);
+    }
+
+    const previous = points[points.length - 2];
+    const last = points[points.length - 1];
+    context.quadraticCurveTo(previous.x, previous.y, last.x, last.y);
   }
+
   context.stroke();
   context.restore();
 }

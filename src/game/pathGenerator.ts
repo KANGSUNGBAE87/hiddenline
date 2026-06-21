@@ -266,29 +266,7 @@ function finalizeBoundaryPath(points: Point[], viewport: Viewport, margin: numbe
       y: clamp(point.y, interiorMargin, viewport.height - interiorMargin),
     };
   });
-  const guardCount = Math.min(Math.max(6, Math.round(clamped.length * 0.045)), Math.floor((clamped.length - 1) / 3));
-  const ramped = clamped.map((point) => ({ ...point }));
-
-  if (guardCount > 1) {
-    const startTarget = clamped[guardCount];
-    const endTarget = clamped[clamped.length - 1 - guardCount];
-
-    for (let index = 0; index <= guardCount; index += 1) {
-      const t = index / guardCount;
-      const endIndex = clamped.length - 1 - index;
-
-      ramped[index] = {
-        x: lerp(start.x, startTarget.x, t),
-        y: lerp(start.y, startTarget.y, t),
-      };
-      ramped[endIndex] = {
-        x: lerp(end.x, endTarget.x, t),
-        y: lerp(end.y, endTarget.y, t),
-      };
-    }
-  }
-
-  const smoothed = softenPolyline(ramped, viewport, margin, 2);
+  const smoothed = softenPolyline(clamped, viewport, margin, 3);
 
   return smoothed.map((point, index) => {
     if (index === 0) return start;

@@ -119,6 +119,22 @@ function minTurnRadius(points: Point[]): number {
   return radius;
 }
 
+function maxHeadingDelta(points: Point[]): number {
+  let maxDelta = 0;
+
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const next = points[index + 1];
+    const first = Math.atan2(current.y - previous.y, current.x - previous.x);
+    const second = Math.atan2(next.y - current.y, next.x - current.x);
+    const delta = Math.abs(Math.atan2(Math.sin(second - first), Math.cos(second - first)));
+    maxDelta = Math.max(maxDelta, delta);
+  }
+
+  return maxDelta;
+}
+
 describe("path generator", () => {
   test("course length controls normalized total path length", () => {
     const daily = createDailyContext(new Date(2026, 5, 21));
@@ -198,6 +214,21 @@ describe("path generator", () => {
       expect(isNearSafeBoundary(path.end), `${courseLengthId}/${overlapDifficultyId}/end`).toBe(true);
       expect(hasOppositeSafeBoundaryAxis(path.start, path.end), `${courseLengthId}/${overlapDifficultyId}/opposite`).toBe(true);
     }
+  });
+
+  test("endpoint anchoring does not insert straight stitched ramps", () => {
+    const daily = createDailyContext(new Date(2026, 5, 22));
+    const path = generatePath({
+      ...daily,
+      seed: "hiddenline-endpoint-curve-guard",
+      courseLengthId: "basic",
+      overlapDifficultyId: "complex",
+      visibilityLevel: "normal",
+      viewport,
+    });
+
+    expect(maxHeadingDelta(path.points.slice(0, 20))).toBeGreaterThan(0.001);
+    expect(maxHeadingDelta(path.points.slice(-20))).toBeGreaterThan(0.001);
   });
 
   test("deterministic seed generates the same path", () => {
