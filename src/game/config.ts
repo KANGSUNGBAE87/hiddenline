@@ -22,7 +22,7 @@ export const GAMEPLAY_DEFAULTS = {
   idleLimitMs: 1500,
   safeMarginPx: 48,
   startGateRadiusPx: 44,
-  maxPathAttempts: 32,
+  maxPathAttempts: 64,
   scoreMax: 1000,
 };
 
@@ -123,27 +123,27 @@ export const OVERLAP_DIFFICULTIES: Record<
   light: {
     minSelfIntersections: 0,
     maxSelfIntersections: 0,
-    minTurnRadiusPx: 0.05,
+    minTurnRadiusPx: 10,
   },
   normal: {
     minSelfIntersections: 1,
     maxSelfIntersections: 2,
-    minTurnRadiusPx: 0.05,
+    minTurnRadiusPx: 5,
   },
   complex: {
     minSelfIntersections: 3,
     maxSelfIntersections: 4,
-    minTurnRadiusPx: 0.05,
+    minTurnRadiusPx: 5,
   },
   hard: {
     minSelfIntersections: 5,
     maxSelfIntersections: 6,
-    minTurnRadiusPx: 0.05,
+    minTurnRadiusPx: 4,
   },
   master: {
     minSelfIntersections: 7,
     maxSelfIntersections: 12,
-    minTurnRadiusPx: 0.05,
+    minTurnRadiusPx: 4,
   },
 };
 

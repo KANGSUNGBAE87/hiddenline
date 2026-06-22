@@ -28,4 +28,12 @@ describe("Result depth v2", () => {
     await user.click(screen.getByRole("button", { name: "점수는 어떻게 계산되나요?" }));
     expect(screen.getByText(/정확도 40/)).toBeInTheDocument();
   });
+
+  test("keeps the home action quiet and removes the extra choices button", () => {
+    render(<ResultScreen record={createRecord({})} previousBest={null} presetId="intro" i18n={createI18n("ko")} onRetry={vi.fn()} onHome={vi.fn()} onSelectPreset={vi.fn()} onDailyEntry={vi.fn()} />);
+    const homeButton = screen.getByRole("button", { name: "홈으로" });
+
+    expect(screen.queryByRole("button", { name: "더 많은 선택" })).not.toBeInTheDocument();
+    expect(homeButton).toHaveClass("secondary-button--quiet");
+  });
 });

@@ -33,7 +33,6 @@ export function ResultScreen({
   const [measurementOpen, setMeasurementOpen] = useState(false);
   const [feedbackSelected, setFeedbackSelected] = useState<string | null>(null);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
 
   const measurementBreakdown =
     record.measurementBreakdown ??
@@ -134,26 +133,11 @@ export function ResultScreen({
       </button>
 
       {/* Secondary actions */}
-      <div className="secondary-actions secondary-actions--compact">
-        <button type="button" className="secondary-button" onClick={onHome}>
+      <div className="secondary-actions">
+        <button type="button" className="secondary-button secondary-button--quiet" onClick={onHome}>
           {i18n.t("result.home")}
         </button>
-        <button type="button" className="secondary-button" onClick={() => setMoreOpen((o) => !o)}>
-          <span>{i18n.t("home.result.moreActions")}</span>
-        </button>
       </div>
-
-      {/* More actions */}
-      {moreOpen && (
-        <div className="secondary-actions secondary-actions--compact">
-          <button type="button" className="secondary-button secondary-button--plain" onClick={() => { onSelectPreset?.("intro"); }}>
-            {i18n.t("home.preset.intro")}
-          </button>
-          <button type="button" className="secondary-button secondary-button--plain" onClick={onDailyEntry}>
-            {i18n.t("home.result.dailyEntry")}
-          </button>
-        </div>
-      )}
 
       {/* Measurement explanation */}
       <section className="measurement-panel" aria-label={i18n.t("measurement.panelLabel")}>

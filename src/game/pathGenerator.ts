@@ -1,5 +1,5 @@
-import { COURSE_LENGTHS, DIFFICULTIES, GAMEPLAY_DEFAULTS, LINE_DIFFICULTIES, OVERLAP_DIFFICULTIES } from "./config";
-import { annotatePolyline, clamp, distance, hasSelfIntersection, lerp, polylineLength } from "./pathGeometry";
+import { COURSE_LENGTHS, DIFFICULTIES, GAMEPLAY_DEFAULTS, OVERLAP_DIFFICULTIES } from "./config";
+import { annotatePolyline, clamp, distance, polylineLength } from "./pathGeometry";
 import { createRng, deriveSeed64 } from "./random";
 import type {
   CourseLengthId,
@@ -25,97 +25,6 @@ type PathGenerationInput = Omit<DailyContext, "difficulty"> & {
   visibilityLevel?: VisibilityLevelId;
   maxAttempts?: number;
 };
-
-const profileSettings: Record<GeneratorProfileId, { primary: number; secondary: number; tertiary: number; lengthBias: number }> = {
-  "gentle-warmup-v1": { primary: 0.12, secondary: 0.16, tertiary: 0.03, lengthBias: 0.92 },
-  "daily-main-normal-v1": { primary: 0.22, secondary: 0.5, tertiary: 0.17, lengthBias: 1 },
-  "curve-control-v1": { primary: 0.27, secondary: 0.58, tertiary: 0.22, lengthBias: 1 },
-  "precision-focus-v1": { primary: 0.18, secondary: 0.72, tertiary: 0.42, lengthBias: 0.98 },
-};
-
-function shouldUseCrossingHardPath(generatorProfileId: GeneratorProfileId, lineDifficulty: LineDifficultyId): boolean {
-  return lineDifficulty === "hard" && generatorProfileId !== "gentle-warmup-v1";
-}
-
-function softenPolyline(points: Point[], viewport: Viewport, margin: number, passes: number): Point[] {
-  let softened = points;
-
-  for (let pass = 0; pass < passes; pass += 1) {
-    softened = softened.map((point, index) => {
-      if (index === 0 || index === softened.length - 1) return point;
-
-      const previous = softened[index - 1];
-      const next = softened[index + 1];
-
-      return {
-        x: clamp(previous.x * 0.22 + point.x * 0.56 + next.x * 0.22, margin, viewport.width - margin),
-        y: clamp(previous.y * 0.22 + point.y * 0.56 + next.y * 0.22, margin, viewport.height - margin),
-      };
-    });
-  }
-
-  return softened;
-}
-
-function fitYToSafeBand(points: Point[], viewport: Viewport, margin: number): Point[] {
-  if (points.length === 0) return points;
-
-  const padding = Math.max(6, Math.min(viewport.width, viewport.height) * 0.018);
-  const minY = margin + padding;
-  const maxY = viewport.height - margin - padding;
-  const bandHeight = Math.max(1, maxY - minY);
-  const values = points.map((point) => point.y);
-  const rawMin = Math.min(...values);
-  const rawMax = Math.max(...values);
-  const rawCenter = (rawMin + rawMax) / 2;
-  const rawHeight = Math.max(1, rawMax - rawMin);
-  const scale = Math.min(1, bandHeight / rawHeight);
-  const scaledMin = rawCenter + (rawMin - rawCenter) * scale;
-  const scaledMax = rawCenter + (rawMax - rawCenter) * scale;
-  const shift =
-    scaledMin < minY
-      ? minY - scaledMin
-      : scaledMax > maxY
-        ? maxY - scaledMax
-        : 0;
-
-  return points.map((point) => ({
-    ...point,
-    y: clamp(rawCenter + (point.y - rawCenter) * scale + shift, minY, maxY),
-  }));
-}
-
-function fitToSafeBox(points: Point[], viewport: Viewport, margin: number): Point[] {
-  if (points.length === 0) return points;
-
-  const padding = Math.max(6, Math.min(viewport.width, viewport.height) * 0.018);
-  const minX = margin + padding;
-  const maxX = viewport.width - margin - padding;
-  const minY = margin + padding;
-  const maxY = viewport.height - margin - padding;
-  const width = Math.max(1, maxX - minX);
-  const height = Math.max(1, maxY - minY);
-  const xs = points.map((point) => point.x);
-  const ys = points.map((point) => point.y);
-  const rawMinX = Math.min(...xs);
-  const rawMaxX = Math.max(...xs);
-  const rawMinY = Math.min(...ys);
-  const rawMaxY = Math.max(...ys);
-  const rawCenterX = (rawMinX + rawMaxX) / 2;
-  const rawCenterY = (rawMinY + rawMaxY) / 2;
-  const scale = Math.min(1, width / Math.max(1, rawMaxX - rawMinX), height / Math.max(1, rawMaxY - rawMinY));
-  const scaledMinX = rawCenterX + (rawMinX - rawCenterX) * scale;
-  const scaledMaxX = rawCenterX + (rawMaxX - rawCenterX) * scale;
-  const scaledMinY = rawCenterY + (rawMinY - rawCenterY) * scale;
-  const scaledMaxY = rawCenterY + (rawMaxY - rawCenterY) * scale;
-  const shiftX = scaledMinX < minX ? minX - scaledMinX : scaledMaxX > maxX ? maxX - scaledMaxX : 0;
-  const shiftY = scaledMinY < minY ? minY - scaledMinY : scaledMaxY > maxY ? maxY - scaledMaxY : 0;
-
-  return points.map((point) => ({
-    x: clamp(rawCenterX + (point.x - rawCenterX) * scale + shiftX, minX, maxX),
-    y: clamp(rawCenterY + (point.y - rawCenterY) * scale + shiftY, minY, maxY),
-  }));
-}
 
 function maxTurnAngle(points: Point[]): number {
   let maxAngle = 0;
@@ -178,15 +87,13 @@ function minTurnRadius(points: Point[]): number {
     const ab = distance(a, b);
     const bc = distance(b, c);
     const ca = distance(c, a);
+    if (ab < 0.8 || bc < 0.8) continue;
+
     const doubleArea = Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
     if (doubleArea > 0.001) minRadius = Math.min(minRadius, (ab * bc * ca) / (2 * doubleArea));
   }
 
   return minRadius;
-}
-
-function smoothStep(t: number): number {
-  return t * t * (3 - 2 * t);
 }
 
 type SafeEdge = "left" | "right" | "top" | "bottom";
@@ -208,37 +115,17 @@ function createBoundaryEndpointPair(rng: () => number, viewport: Viewport, margi
     if (edge === "left" || edge === "right") {
       return {
         x: edge === "left" ? margin : viewport.width - margin,
-        y: margin + height * (0.08 + rng() * 0.84),
+        y: margin + height * (0.18 + rng() * 0.64),
       };
     }
 
     return {
-      x: margin + width * (0.08 + rng() * 0.84),
+      x: margin + width * (0.18 + rng() * 0.64),
       y: edge === "top" ? margin : viewport.height - margin,
     };
   };
 
   return { start: pointOnEdge(startEdge), end: pointOnEdge(endEdge), axis: horizontal ? "horizontal" : "vertical" };
-}
-
-function applyEndpointAnchors(points: Point[], start: Point, end: Point): Point[] {
-  if (points.length <= 1) return points;
-
-  const first = points[0];
-  const last = points[points.length - 1];
-  const startDelta = { x: start.x - first.x, y: start.y - first.y };
-  const endDelta = { x: end.x - last.x, y: end.y - last.y };
-
-  return points.map((point, index) => {
-    const t = index / (points.length - 1);
-    const startWeight = 1 - smoothStep(clamp(t / 0.42, 0, 1));
-    const endWeight = smoothStep(clamp((t - 0.58) / 0.42, 0, 1));
-
-    return {
-      x: point.x + startDelta.x * startWeight + endDelta.x * endWeight,
-      y: point.y + startDelta.y * startWeight + endDelta.y * endWeight,
-    };
-  });
 }
 
 function allInsideSafeBox(points: Point[], viewport: Viewport, margin: number): boolean {
@@ -250,117 +137,6 @@ function allInsideSafeBox(points: Point[], viewport: Viewport, margin: number): 
       point.y <= viewport.height - margin,
   );
 }
-
-function finalizeBoundaryPath(points: Point[], viewport: Viewport, margin: number, start: Point, end: Point): Point[] {
-  if (points.length <= 1) return points;
-
-  const interiorMargin = margin + Math.max(4, Math.min(viewport.width, viewport.height) * 0.012);
-  const fitted = fitToSafeBox(points, viewport, margin);
-  const anchored = applyEndpointAnchors(fitted, start, end);
-  const clamped = anchored.map((point, index) => {
-    if (index === 0) return start;
-    if (index === anchored.length - 1) return end;
-
-    return {
-      x: clamp(point.x, margin, viewport.width - margin),
-      y: clamp(point.y, interiorMargin, viewport.height - interiorMargin),
-    };
-  });
-  const smoothed = softenPolyline(clamped, viewport, margin, 3);
-
-  return smoothed.map((point, index) => {
-    if (index === 0) return start;
-    if (index === smoothed.length - 1) return end;
-
-    return {
-      x: clamp(point.x, margin, viewport.width - margin),
-      y: clamp(point.y, interiorMargin, viewport.height - interiorMargin),
-    };
-  });
-}
-
-function addSmoothLengthWiggle(
-  rng: () => number,
-  points: Point[],
-  viewport: Viewport,
-  margin: number,
-  targetNormalizedLength: number,
-): Point[] {
-  const currentLength = normalizedLength(points, viewport);
-  if (currentLength >= targetNormalizedLength * 0.96 || points.length < 4) return points;
-
-  const phase = rng() * Math.PI * 2;
-  const frequency = Math.max(4, Math.min(22, targetNormalizedLength * 3.8 + rng() * 2));
-  const maxAmplitude = Math.min(viewport.width, viewport.height) * 0.18;
-  let best: { points: Point[]; delta: number } | null = null;
-  let low = 0;
-  let high = maxAmplitude;
-
-  const create = (amplitude: number): Point[] => points.map((point, index) => {
-    if (index === 0 || index === points.length - 1) return point;
-
-    const previous = points[index - 1];
-    const next = points[index + 1];
-    const tangent = { x: next.x - previous.x, y: next.y - previous.y };
-    const tangentLength = Math.max(1, Math.hypot(tangent.x, tangent.y));
-    const normal = { x: -tangent.y / tangentLength, y: tangent.x / tangentLength };
-    const t = index / (points.length - 1);
-    const edgeEase = Math.sin(t * Math.PI);
-    const offset = Math.sin(t * Math.PI * frequency + phase) * amplitude * edgeEase;
-
-    return {
-      x: point.x + normal.x * offset,
-      y: point.y + normal.y * offset,
-    };
-  });
-
-  for (let pass = 0; pass < 14; pass += 1) {
-    const amplitude = (low + high) / 2;
-    const candidate = create(amplitude);
-    const inside = allInsideSafeBox(candidate, viewport, margin);
-    const length = normalizedLength(candidate, viewport);
-    const delta = Math.abs(length - targetNormalizedLength);
-
-    if (inside && (!best || delta < best.delta)) best = { points: candidate, delta };
-    if (!inside || length > targetNormalizedLength) high = amplitude;
-    else low = amplitude;
-  }
-
-  return best?.points ?? points;
-}
-
-const overlapShapeCandidates: Record<OverlapDifficultyId, Array<{ xFrequency: number; yFrequency: number; spanMultiplier: number }>> = {
-  light: [
-    { xFrequency: 0, yFrequency: 0, spanMultiplier: 1 },
-  ],
-  normal: [
-    { xFrequency: 1, yFrequency: 2, spanMultiplier: 1 },
-    { xFrequency: 1, yFrequency: 2, spanMultiplier: 1.25 },
-  ],
-  complex: [
-    { xFrequency: 1, yFrequency: 3, spanMultiplier: 1 },
-    { xFrequency: 1, yFrequency: 2, spanMultiplier: 1.5 },
-  ],
-  hard: [
-    { xFrequency: 5, yFrequency: 14, spanMultiplier: 1 },
-    { xFrequency: 6, yFrequency: 17, spanMultiplier: 1 },
-    { xFrequency: 4, yFrequency: 11, spanMultiplier: 1 },
-    { xFrequency: 3, yFrequency: 10, spanMultiplier: 1 },
-    { xFrequency: 1, yFrequency: 4, spanMultiplier: 1.08 },
-    { xFrequency: 1, yFrequency: 5, spanMultiplier: 1.04 },
-    { xFrequency: 1, yFrequency: 3, spanMultiplier: 1.5 },
-  ],
-  master: [
-    { xFrequency: 8, yFrequency: 23, spanMultiplier: 1 },
-    { xFrequency: 7, yFrequency: 20, spanMultiplier: 1 },
-    { xFrequency: 6, yFrequency: 17, spanMultiplier: 1 },
-    { xFrequency: 4, yFrequency: 13, spanMultiplier: 1 },
-    { xFrequency: 3, yFrequency: 10, spanMultiplier: 1 },
-    { xFrequency: 2, yFrequency: 7, spanMultiplier: 1 },
-    { xFrequency: 1, yFrequency: 5, spanMultiplier: 1.25 },
-    { xFrequency: 1, yFrequency: 7, spanMultiplier: 1 },
-  ],
-};
 
 const overlapByLineDifficulty: Record<LineDifficultyId, OverlapDifficultyId> = {
   easy: "normal",
@@ -379,100 +155,92 @@ function normalizedLength(points: Point[], viewport: Viewport): number {
   return polylineLength(points) / Math.max(1, Math.min(viewport.width, viewport.height));
 }
 
-function sampleOpenBoundaryCurve(
+const largeLoopFormulaCandidates: Record<
+  OverlapDifficultyId,
+  Array<{ loopFrequency: number; snakeMultiplier: number; loopAmplitude: number; loopSquash: number }>
+> = {
+  light: [
+    { loopFrequency: 0, snakeMultiplier: 0.78, loopAmplitude: 0, loopSquash: 0 },
+    { loopFrequency: 0, snakeMultiplier: 0.86, loopAmplitude: 0, loopSquash: 0 },
+  ],
+  normal: [
+    { loopFrequency: 1, snakeMultiplier: 0.78, loopAmplitude: 0.17, loopSquash: 0.82 },
+    { loopFrequency: 1.15, snakeMultiplier: 0.84, loopAmplitude: 0.18, loopSquash: 0.78 },
+    { loopFrequency: 1.35, snakeMultiplier: 0.72, loopAmplitude: 0.16, loopSquash: 0.86 },
+  ],
+  complex: [
+    { loopFrequency: 2.3, snakeMultiplier: 0.78, loopAmplitude: 0.17, loopSquash: 0.82 },
+    { loopFrequency: 2.5, snakeMultiplier: 0.72, loopAmplitude: 0.18, loopSquash: 0.8 },
+    { loopFrequency: 2.1, snakeMultiplier: 0.88, loopAmplitude: 0.16, loopSquash: 0.86 },
+  ],
+  hard: [
+    { loopFrequency: 4, snakeMultiplier: 0.72, loopAmplitude: 0.24, loopSquash: 0.82 },
+    { loopFrequency: 4.4, snakeMultiplier: 0.78, loopAmplitude: 0.25, loopSquash: 0.78 },
+    { loopFrequency: 4.8, snakeMultiplier: 0.68, loopAmplitude: 0.22, loopSquash: 0.84 },
+  ],
+  master: [
+    { loopFrequency: 4.8, snakeMultiplier: 0.72, loopAmplitude: 0.22, loopSquash: 0.82 },
+    { loopFrequency: 5.2, snakeMultiplier: 0.68, loopAmplitude: 0.24, loopSquash: 0.78 },
+    { loopFrequency: 5.6, snakeMultiplier: 0.64, loopAmplitude: 0.2, loopSquash: 0.86 },
+  ],
+};
+
+function sampleLargeLoopBoundaryCurve(
   rng: () => number,
   viewport: Viewport,
   margin: number,
   sampleCount: number,
   endpoints: EndpointPair,
   courseLengthId: CourseLengthId,
+  overlapDifficultyId: OverlapDifficultyId,
+  attemptIndex: number,
 ): Point[] {
   const course = COURSE_LENGTHS[courseLengthId];
-  const { start, end, axis } = endpoints;
-  const frequency = Math.max(2.8, Math.min(32, course.targetNormalizedLength * 5.2));
-  const phase = (rng() - 0.5) * Math.PI * 0.22;
-  const secondaryPhase = rng() * Math.PI * 2;
-  const maxAmplitude = Math.min(viewport.width, viewport.height) * 0.46;
+  const { start, end } = endpoints;
+  const chord = Math.max(1, distance(start, end));
+  const tangent = { x: (end.x - start.x) / chord, y: (end.y - start.y) / chord };
+  const normal = { x: -tangent.y, y: tangent.x };
+  const formulas = largeLoopFormulaCandidates[overlapDifficultyId];
+  const formula = formulas[attemptIndex % formulas.length] ?? formulas[0];
+  const minDimension = Math.min(viewport.width, viewport.height);
+  const snakeFrequency = Math.max(0.95, course.targetNormalizedLength * formula.snakeMultiplier * (0.96 + rng() * 0.08));
+  const snakePhase = (rng() - 0.5) * Math.PI * 0.34;
+  const loopPhase = (rng() - 0.5) * Math.PI * 0.22;
+  const snakeAmplitude = minDimension * (0.32 + rng() * 0.18);
+  const loopAmplitude = minDimension * formula.loopAmplitude * (0.92 + rng() * 0.16);
   let best: { points: Point[]; delta: number } | null = null;
-  let low = 0;
-  let high = maxAmplitude;
+  let low = 0.16;
+  let high = 1.42;
 
-  const create = (amplitude: number): Point[] => Array.from({ length: sampleCount }, (_, index) => {
+  const create = (scale: number): Point[] => Array.from({ length: sampleCount }, (_, index) => {
     const t = index / (sampleCount - 1);
-    const edgeEase = Math.sin(t * Math.PI);
-    const wave =
-      Math.sin(t * Math.PI * frequency + phase) * amplitude +
-      Math.sin(t * Math.PI * frequency * 0.5 + secondaryPhase) * amplitude * 0.18;
-    const offset = wave * edgeEase;
-
-    if (axis === "horizontal") {
-      return {
-        x: lerp(start.x, end.x, t),
-        y: lerp(start.y, end.y, t) + offset,
-      };
-    }
+    const envelope = Math.sin(t * Math.PI);
+    const snake = Math.sin(t * Math.PI * 2 * snakeFrequency + snakePhase) * snakeAmplitude * scale * envelope;
+    const loopAngle = t * Math.PI * 2 * formula.loopFrequency + loopPhase;
+    const loopLongitudinal = Math.cos(loopAngle) * loopAmplitude * scale * envelope;
+    const loopLateral = Math.sin(loopAngle) * loopAmplitude * formula.loopSquash * scale * envelope;
+    const along = chord * t + loopLongitudinal;
+    const lateral = snake + loopLateral;
 
     return {
-      x: lerp(start.x, end.x, t) + offset,
-      y: lerp(start.y, end.y, t),
+      x: start.x + tangent.x * along + normal.x * lateral,
+      y: start.y + tangent.y * along + normal.y * lateral,
     };
   });
 
   for (let pass = 0; pass < 18; pass += 1) {
-    const amplitude = (low + high) / 2;
-    const points = create(amplitude);
+    const scale = (low + high) / 2;
+    const points = create(scale);
     const inside = allInsideSafeBox(points, viewport, margin);
     const length = normalizedLength(points, viewport);
     const delta = Math.abs(length - course.targetNormalizedLength);
 
     if (inside && (!best || delta < best.delta)) best = { points, delta };
-    if (!inside || length > course.targetNormalizedLength) high = amplitude;
-    else low = amplitude;
+    if (!inside || length > course.targetNormalizedLength) high = scale;
+    else low = scale;
   }
 
-  return finalizeBoundaryPath(best?.points ?? create(0), viewport, margin, start, end);
-}
-
-function sampleContinuousFormula(
-  rng: () => number,
-  viewport: Viewport,
-  margin: number,
-  sampleCount: number,
-  shape: { xFrequency: number; yFrequency: number; spanMultiplier: number },
-  scale: number,
-  start: Point,
-  end: Point,
-  targetNormalizedLength: number,
-): Point[] {
-  const width = Math.max(1, viewport.width - margin * 2);
-  const height = Math.max(1, viewport.height - margin * 2);
-  const center = { x: viewport.width / 2, y: viewport.height / 2 };
-  const phaseX = 0;
-  const phaseY = 0;
-  const phaseDrift = (rng() - 0.5) * Math.PI * 0.35;
-  const direction = 1;
-  const drift = width * (0.018 + rng() * 0.028);
-  const ampX = width * (0.36 + rng() * 0.06) * scale;
-  const ampY = height * (0.34 + rng() * 0.07) * scale;
-  const tilt = (rng() - 0.5) * 0.24;
-  const span = Math.PI * 2 * shape.spanMultiplier * (0.985 + rng() * 0.03);
-
-  const points = Array.from({ length: sampleCount }, (_, index) => {
-    const t = index / (sampleCount - 1);
-    const theta = (t - 0.25) * span;
-    const centeredT = t - 0.5;
-    const waveX = Math.sin(shape.xFrequency * theta + phaseX);
-    const waveY = Math.sin(shape.yFrequency * theta * direction + phaseY);
-    const slowBreath = Math.sin(theta * 0.5 + phaseDrift) * 0.08;
-
-    return {
-      x: center.x + waveX * ampX + centeredT * drift,
-      y: center.y + waveY * ampY + centeredT * width * tilt + slowBreath * ampY,
-    };
-  });
-
-  const anchored = finalizeBoundaryPath(points, viewport, margin, start, end);
-  return finalizeBoundaryPath(addSmoothLengthWiggle(rng, anchored, viewport, margin, targetNormalizedLength), viewport, margin, start, end);
+  return best?.points ?? create(0);
 }
 
 function createContinuousCurve(
@@ -487,145 +255,29 @@ function createContinuousCurve(
   const course = COURSE_LENGTHS[courseLengthId];
   const endpoints = createBoundaryEndpointPair(rng, viewport, margin);
 
-  if (overlapDifficultyId === "light") {
-    return sampleOpenBoundaryCurve(rng, viewport, margin, course.sampleCount, endpoints, courseLengthId);
-  }
-
-  const shapes = overlapShapeCandidates[overlapDifficultyId];
-  const shape = shapes[attemptIndex % shapes.length] ?? shapes[0];
-  const target = course.targetNormalizedLength;
-  let best: { points: Point[]; delta: number } | null = null;
-  let low = 0.12;
-  let high = 1.24;
-
-  for (let pass = 0; pass < 14; pass += 1) {
-    const scale = (low + high) / 2;
-    const points = sampleContinuousFormula(rng, viewport, margin, course.sampleCount, shape, scale, endpoints.start, endpoints.end, target);
-    const length = normalizedLength(points, viewport);
-    const delta = Math.abs(length - target);
-
-    if (!best || delta < best.delta) best = { points, delta };
-    if (length < target) low = scale;
-    else high = scale;
-  }
-
-  return best?.points ?? sampleContinuousFormula(rng, viewport, margin, course.sampleCount, shape, 0.58, endpoints.start, endpoints.end, target);
-}
-
-function createHardCrossingCurve(
-  rng: () => number,
-  viewport: Viewport,
-  start: Point,
-  end: Point,
-  margin: number,
-  width: number,
-  height: number,
-  generatorProfileId: GeneratorProfileId,
-  sampleCount: number,
-): Point[] {
-  const direction = rng() > 0.5 ? 1 : -1;
-  const centerX = margin + width * (0.48 + (rng() - 0.5) * 0.12);
-  const isCurve = generatorProfileId === "curve-control-v1";
-  const isPrecision = generatorProfileId === "precision-focus-v1";
-  const radiusX = width * (isCurve ? 0.22 + rng() * 0.03 : isPrecision ? 0.18 + rng() * 0.025 : 0.16 + rng() * 0.025);
-  const radiusY = height * (isCurve ? 0.2 + rng() * 0.03 : isPrecision ? 0.15 + rng() * 0.025 : 0.13 + rng() * 0.02);
-  const leadCount = Math.max(18, Math.round(sampleCount * (isCurve ? 0.16 : 0.18)));
-  const exitCount = Math.max(18, Math.round(sampleCount * (isPrecision ? 0.2 : 0.18)));
-  const loopCount = Math.max(72, sampleCount - leadCount - exitCount);
-  const loopYScale = isCurve ? 2.05 : isPrecision ? 1.72 : 1.86;
-  const loopYOffset = radiusY * loopYScale * 0.5;
-  const yPadding = Math.max(6, Math.min(viewport.width, viewport.height) * 0.018);
-  const minCenterY = margin + yPadding + loopYOffset;
-  const maxCenterY = viewport.height - margin - yPadding - loopYOffset;
-  const centerY = clamp(margin + height * (0.36 + rng() * 0.28), minCenterY, maxCenterY);
-  const thetaStart = Math.PI * 0.16;
-  const thetaEnd = Math.PI * 1.84;
-  const loopPoint = (theta: number): Point => ({
-    x: clamp(centerX + Math.cos(theta) * radiusX, margin, viewport.width - margin),
-    y: centerY + direction * Math.sin(theta) * Math.cos(theta) * radiusY * loopYScale,
-  });
-  const loopStart = loopPoint(thetaStart);
-  const loopEnd = loopPoint(thetaEnd);
-  const bridge = (from: Point, to: Point, t: number): Point => {
-    const easedT = smoothStep(t);
-
-    return {
-      x: clamp(lerp(from.x, to.x, easedT), margin, viewport.width - margin),
-      y: clamp(lerp(from.y, to.y, easedT), margin, viewport.height - margin),
-    };
-  };
-  const lead = Array.from({ length: leadCount }, (_, index) => bridge(start, loopStart, index / leadCount));
-  const loop = Array.from({ length: loopCount }, (_, index) => {
-    const theta = lerp(thetaStart, thetaEnd, index / (loopCount - 1));
-
-    return loopPoint(theta);
-  });
-  const exit = Array.from({ length: exitCount }, (_, index) => bridge(loopEnd, end, (index + 1) / exitCount));
-
-  return softenPolyline(fitYToSafeBand([...lead, ...loop, ...exit], viewport, margin), viewport, margin, isPrecision ? 5 : 4);
+  return sampleLargeLoopBoundaryCurve(
+    rng,
+    viewport,
+    margin,
+    course.sampleCount,
+    endpoints,
+    courseLengthId,
+    overlapDifficultyId,
+    attemptIndex,
+  );
 }
 
 function createSampledCurve(
   seed: string,
   viewport: Viewport,
   attemptIndex: number,
-  generatorProfileId: GeneratorProfileId,
-  lineDifficulty: LineDifficultyId,
+  _generatorProfileId: GeneratorProfileId,
+  _lineDifficulty: LineDifficultyId,
   courseLengthId: CourseLengthId,
   overlapDifficultyId: OverlapDifficultyId,
-  fallback = false,
+  _fallback = false,
 ): Point[] {
-  if (!fallback) return createContinuousCurve(seed, viewport, attemptIndex, courseLengthId, overlapDifficultyId);
-
-  const rng = createRng(`${seed}:${attemptIndex}:${fallback ? "fallback" : "candidate"}`);
-  const margin = Math.min(GAMEPLAY_DEFAULTS.safeMarginPx, Math.max(16, Math.min(viewport.width, viewport.height) * 0.18));
-  const width = Math.max(1, viewport.width - margin * 2);
-  const height = Math.max(1, viewport.height - margin * 2);
-  const profile = profileSettings[generatorProfileId];
-  const shape = LINE_DIFFICULTIES[lineDifficulty];
-  const sampleCount = shape.sampleCount;
-
-  const start: Point = {
-    x: margin,
-    y: margin + rng() * height,
-  };
-  const end: Point = {
-    x: Math.min(viewport.width - margin, margin + width * profile.lengthBias),
-    y: margin + rng() * height,
-  };
-
-  if (shouldUseCrossingHardPath(generatorProfileId, lineDifficulty)) {
-    return createHardCrossingCurve(rng, viewport, start, end, margin, width, height, generatorProfileId, sampleCount);
-  }
-
-  const phase = rng() * Math.PI * 2;
-  const amplitude = (fallback ? height * 0.2 : height * (profile.primary + rng() * 0.09)) * shape.amplitudeMultiplier;
-  const secondaryAmplitude = amplitude * (fallback ? 0.18 : profile.secondary * shape.secondaryMultiplier);
-  const tertiaryAmplitude = amplitude * profile.tertiary * shape.tertiaryMultiplier;
-  const quaternaryAmplitude = amplitude * 0.2 * shape.quaternaryMultiplier;
-  const bend = rng() > 0.5 ? 1 : -1;
-  const secondaryPhase = rng() * Math.PI * 2;
-  const tertiaryPhase = rng() * Math.PI * 2;
-  const quaternaryPhase = rng() * Math.PI * 2;
-
-  const points = Array.from({ length: sampleCount }, (_, index) => {
-    const t = index / (sampleCount - 1);
-    const x = lerp(start.x, end.x, t);
-    const baseY = lerp(start.y, end.y, t);
-    const wave =
-      Math.sin(t * Math.PI * 2 + phase) * amplitude * bend +
-      Math.sin(t * Math.PI * 4 + secondaryPhase) * secondaryAmplitude +
-      Math.sin(t * Math.PI * 6 + tertiaryPhase) * tertiaryAmplitude +
-      Math.sin(t * Math.PI * 8 + quaternaryPhase) * quaternaryAmplitude;
-    const edgeEase = Math.sin(t * Math.PI);
-
-    return {
-      x,
-      y: baseY + wave * edgeEase,
-    };
-  });
-
-  return fitYToSafeBand(points, viewport, margin);
+  return createContinuousCurve(seed, viewport, attemptIndex, courseLengthId, overlapDifficultyId);
 }
 
 function isValid(
@@ -691,7 +343,7 @@ function createFallback(
           ? length - course.maxNormalizedLength
           : 0;
     const smoothMiss = Math.max(0, maxTurnAngle(points) - 1.05);
-    const score = missingOverlap * 100 + lengthMiss * 12 + smoothMiss * 24 + Math.abs(length - course.targetNormalizedLength);
+    const score = missingOverlap * 1000 + lengthMiss * 12 + smoothMiss * 24 + Math.abs(length - course.targetNormalizedLength);
 
     if (!best || score < best.score) best = { points, score };
   }

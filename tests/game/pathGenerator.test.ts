@@ -113,6 +113,8 @@ function minTurnRadius(points: Point[]): number {
     const ab = Math.hypot(a.x - b.x, a.y - b.y);
     const bc = Math.hypot(b.x - c.x, b.y - c.y);
     const ca = Math.hypot(c.x - a.x, c.y - a.y);
+    if (ab < 0.8 || bc < 0.8) continue;
+
     const doubleArea = Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
     if (doubleArea > 0.001) radius = Math.min(radius, (ab * bc * ca) / (2 * doubleArea));
   }
@@ -133,6 +135,31 @@ function maxHeadingDelta(points: Point[]): number {
   }
 
   return maxDelta;
+}
+
+function curvatureDirectionChanges(points: Point[]): number {
+  let changes = 0;
+  let previousSign = 0;
+
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const next = points[index + 1];
+    const first = { x: current.x - previous.x, y: current.y - previous.y };
+    const second = { x: next.x - current.x, y: next.y - current.y };
+    const firstLength = Math.hypot(first.x, first.y);
+    const secondLength = Math.hypot(second.x, second.y);
+    if (firstLength < 0.8 || secondLength < 0.8) continue;
+
+    const cross = (first.x * second.y - first.y * second.x) / (firstLength * secondLength);
+    if (Math.abs(cross) < 0.012) continue;
+
+    const sign = Math.sign(cross);
+    if (previousSign !== 0 && sign !== previousSign) changes += 1;
+    previousSign = sign;
+  }
+
+  return changes;
 }
 
 describe("path generator", () => {
@@ -187,6 +214,33 @@ describe("path generator", () => {
       expect(intersections, overlapDifficultyId).toBeLessThanOrEqual(max);
       expect(maxTurnAngle(path.points), overlapDifficultyId).toBeLessThan(0.9);
       expect(minTurnRadius(path.points), overlapDifficultyId).toBeGreaterThan(0.05);
+    }
+  });
+
+  test("overlap difficulty uses broad loop patterns instead of high-frequency wiggles", () => {
+    const daily = createDailyContext(new Date(2026, 5, 22));
+    const cases: Array<[OverlapDifficultyId, number, number, number]> = [
+      ["light", 0, 8, 10],
+      ["normal", 1, 14, 5],
+      ["complex", 3, 20, 5],
+      ["hard", 5, 28, 4],
+      ["master", 7, 36, 4],
+    ];
+
+    for (const [overlapDifficultyId, minIntersections, maxCurvatureChanges, minRadius] of cases) {
+      const path = generatePath({
+        ...daily,
+        seed: `hiddenline-large-loop-pattern:${overlapDifficultyId}`,
+        courseLengthId: "marathon",
+        overlapDifficultyId,
+        visibilityLevel: "normal",
+        viewport,
+      });
+      const intersections = countSelfIntersections(path.points);
+
+      expect(intersections, overlapDifficultyId).toBeGreaterThanOrEqual(minIntersections);
+      expect(curvatureDirectionChanges(path.points), overlapDifficultyId).toBeLessThanOrEqual(maxCurvatureChanges);
+      expect(minTurnRadius(path.points), overlapDifficultyId).toBeGreaterThan(minRadius);
     }
   });
 
