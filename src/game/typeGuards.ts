@@ -13,7 +13,7 @@ import type {
 const lineTypes = ["warmup", "main", "curve", "precision"] as const;
 const courseLengths = ["short", "basic", "long", "longRun", "marathon"] as const;
 const overlapDifficulties = ["light", "normal", "complex", "hard", "master"] as const;
-const generatorVersions = ["daily-v1"] as const;
+const generatorVersions = ["daily-v1", "analytic-v2"] as const;
 const generatorProfiles = ["gentle-warmup-v1", "daily-main-normal-v1", "curve-control-v1", "precision-focus-v1"] as const;
 const scoringProfiles = ["practice-no-official-v1", "official-balanced-v2", "curve-control-v1", "precision-accuracy-v1"] as const;
 const lineDifficulties = ["easy", "normal", "hard"] as const;

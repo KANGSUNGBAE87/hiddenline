@@ -57,7 +57,7 @@ describe("Home course/overlap/sight layout", () => {
 
     expect(screen.getByRole("img", { name: "오늘의 선 미리보기" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "오늘의 선 시작하기" })).toBeInTheDocument();
-    expect(screen.getByText("기본 코스 · 겹침 Normal · 시야 보통")).toBeInTheDocument();
+    expect(screen.getByText("기본 코스 · 곡선 Normal · 시야 보통")).toBeInTheDocument();
     expect(screen.queryByText(/5개 난이도/)).not.toBeInTheDocument();
     expect(screen.queryByText("공식 프리셋")).not.toBeInTheDocument();
   });
@@ -92,10 +92,10 @@ describe("Home course/overlap/sight layout", () => {
     expect(onSelectVisibilityLevel).toHaveBeenCalledWith("hard");
   });
 
-  test("shows overlap difficulty as Intro to Expert with a 3 plus 2 layout", () => {
+  test("shows curve difficulty as Intro to Expert with a 3 plus 2 layout", () => {
     renderHome();
 
-    const overlapGroup = screen.getByRole("group", { name: "겹침난도" });
+    const overlapGroup = screen.getByRole("group", { name: "곡선 난도" });
     const overlapButtons = within(overlapGroup).getAllByRole("button");
 
     expect(overlapButtons.map((button) => button.getAttribute("aria-label"))).toEqual([
@@ -105,11 +105,11 @@ describe("Home course/overlap/sight layout", () => {
       "Hard",
       "Expert",
     ]);
-    expect(within(overlapGroup).getByText("0")).toBeInTheDocument();
-    expect(within(overlapGroup).getByText("1-2회")).toBeInTheDocument();
-    expect(within(overlapGroup).getByText("3-4회")).toBeInTheDocument();
-    expect(within(overlapGroup).getByText("5-6회")).toBeInTheDocument();
-    expect(within(overlapGroup).getByText("7회 이상")).toBeInTheDocument();
+    expect(within(overlapGroup).getByText("가장 완만")).toBeInTheDocument();
+    expect(within(overlapGroup).getByText("약한 굽이")).toBeInTheDocument();
+    expect(within(overlapGroup).getByText("기본 굽이")).toBeInTheDocument();
+    expect(within(overlapGroup).getByText("깊은 굽이")).toBeInTheDocument();
+    expect(within(overlapGroup).getByText("가장 복잡")).toBeInTheDocument();
     expect(overlapGroup.querySelector(".choice-grid--five")).toBeInTheDocument();
   });
 });

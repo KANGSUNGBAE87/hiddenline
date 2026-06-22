@@ -69,8 +69,9 @@ test("scripted pointer trace can complete a real Daily run", async ({ page }) =>
   const start = toScreen(path!.start);
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
-  for (let index = 1; index < path!.points.length; index += 1) {
-    await page.waitForTimeout(80);
+  const step = Math.max(1, Math.floor(path!.points.length / 420));
+  for (let index = step; index < path!.points.length; index += step) {
+    await page.waitForTimeout(24);
     const point = toScreen(path!.points[index]);
     await page.mouse.move(point.x, point.y);
   }

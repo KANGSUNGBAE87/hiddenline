@@ -1,7 +1,7 @@
 import type { CourseLengthId, DifficultyId, GeneratorVersion, LineDifficultyId, OverlapDifficultyId, VisibilityLevelId } from "./types";
 
 export const GAMEPLAY_DEFAULTS = {
-  generatorVersion: "daily-v1" as GeneratorVersion,
+  generatorVersion: "analytic-v2" as GeneratorVersion,
   seedNamespace: "hiddenline-daily",
   officialDailyDifficulty: "normal" as const,
   finishThresholdT: 0.98,
@@ -123,27 +123,27 @@ export const OVERLAP_DIFFICULTIES: Record<
   light: {
     minSelfIntersections: 0,
     maxSelfIntersections: 0,
-    minTurnRadiusPx: 10,
+    minTurnRadiusPx: 5.5,
   },
   normal: {
-    minSelfIntersections: 1,
-    maxSelfIntersections: 2,
-    minTurnRadiusPx: 5,
+    minSelfIntersections: 0,
+    maxSelfIntersections: 0,
+    minTurnRadiusPx: 4.5,
   },
   complex: {
-    minSelfIntersections: 3,
-    maxSelfIntersections: 4,
-    minTurnRadiusPx: 5,
+    minSelfIntersections: 0,
+    maxSelfIntersections: 0,
+    minTurnRadiusPx: 3.5,
   },
   hard: {
-    minSelfIntersections: 5,
-    maxSelfIntersections: 6,
-    minTurnRadiusPx: 4,
+    minSelfIntersections: 0,
+    maxSelfIntersections: 0,
+    minTurnRadiusPx: 2.5,
   },
   master: {
-    minSelfIntersections: 7,
-    maxSelfIntersections: 12,
-    minTurnRadiusPx: 4,
+    minSelfIntersections: 0,
+    maxSelfIntersections: 0,
+    minTurnRadiusPx: 2,
   },
 };
 

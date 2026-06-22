@@ -28,19 +28,25 @@ const tallPath = generatePath({
 
 function traceToEnd(machine: ReturnType<typeof createSessionMachine>, targetPath = path) {
   machine.pointerDown(targetPath.start, 0);
-  for (let index = 1; index < targetPath.points.length; index += 1) {
-    machine.pointerMove(targetPath.points[index], index * 32);
+  const step = Math.max(1, Math.floor(targetPath.points.length / 420));
+  let moveIndex = 1;
+  for (let index = step; index < targetPath.points.length; index += step) {
+    machine.pointerMove(targetPath.points[index], moveIndex * 32);
+    moveIndex += 1;
   }
+  machine.pointerMove(targetPath.end, moveIndex * 32);
 }
 
 function traceToEndWithPlaySmoothing(machine: ReturnType<typeof createSessionMachine>, targetPath = path) {
   let smoothedPoint: Point | null = null;
   let rawPoint: Point | null = null;
+  const step = Math.max(1, Math.floor(targetPath.points.length / 420));
+  let moveIndex = 1;
   machine.pointerDown(targetPath.start, 0);
   smoothedPoint = targetPath.start;
   rawPoint = targetPath.start;
 
-  for (let index = 1; index < targetPath.points.length; index += 1) {
+  for (let index = step; index < targetPath.points.length; index += step) {
     const deadzonedPoint = applyDeadzone(rawPoint, targetPath.points[index], GAMEPLAY_DEFAULTS.deadzonePx);
     const nextPoint = smoothPoint(
       smoothedPoint,
@@ -49,12 +55,13 @@ function traceToEndWithPlaySmoothing(machine: ReturnType<typeof createSessionMac
     );
     rawPoint = deadzonedPoint;
     smoothedPoint = nextPoint;
-    machine.pointerMove(nextPoint, index * 48);
+    machine.pointerMove(nextPoint, moveIndex * 48);
+    moveIndex += 1;
     if (machine.getSnapshot().status === "failed") break;
   }
 
   for (let hold = 0; hold < 96 && machine.getSnapshot().status !== "success"; hold += 1) {
-    const timeMs = targetPath.points.length * 48 + hold * 48;
+    const timeMs = moveIndex * 48 + hold * 48;
     const deadzonedPoint = applyDeadzone(rawPoint, targetPath.end, GAMEPLAY_DEFAULTS.deadzonePx);
     const nextPoint = smoothPoint(
       smoothedPoint,
@@ -65,6 +72,19 @@ function traceToEndWithPlaySmoothing(machine: ReturnType<typeof createSessionMac
     smoothedPoint = nextPoint;
     machine.pointerMove(nextPoint, timeMs);
   }
+}
+
+function offsetNormal(targetPath: typeof path, index: number, amount: number): Point {
+  const previous = targetPath.points[Math.max(0, index - 1)];
+  const next = targetPath.points[Math.min(targetPath.points.length - 1, index + 1)];
+  const dx = next.x - previous.x;
+  const dy = next.y - previous.y;
+  const length = Math.hypot(dx, dy) || 1;
+
+  return {
+    x: targetPath.points[index].x - (dy / length) * amount,
+    y: targetPath.points[index].y + (dx / length) * amount,
+  };
 }
 
 describe("session machine", () => {
@@ -88,11 +108,11 @@ describe("session machine", () => {
   test("warning meter increases and can recover", () => {
     const machine = createSessionMachine(path);
     machine.pointerDown(path.start, 0);
-    machine.pointerMove({ x: path.points[1].x, y: path.points[1].y + 36 }, 100);
+    machine.pointerMove(offsetNormal(path, 64, path.rules.pathWidthPx + 8), 100);
     expect(machine.getSnapshot().status).toBe("warning");
 
-    machine.pointerMove(path.points[2], 300);
-    machine.pointerMove(path.points[3], 650);
+    machine.pointerMove(path.points[96], 300);
+    machine.pointerMove(path.points[128], 650);
     expect(machine.getSnapshot().warningMeter).toBeLessThan(100);
   });
 

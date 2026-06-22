@@ -100,8 +100,30 @@ export function projectPointToPath(
   let best: PathProjection | null = null;
   const minT = window ? clamp(window.minT, 0, 1) : 0;
   const maxT = window ? clamp(window.maxT, 0, 1) : 1;
+  let startIndex = 1;
+  let endIndex = path.length - 1;
 
-  for (let index = 1; index < path.length; index += 1) {
+  if (window) {
+    let low = 1;
+    let high = path.length - 1;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (path[mid].t < minT) low = mid + 1;
+      else high = mid;
+    }
+    startIndex = Math.max(1, low - 1);
+
+    low = startIndex;
+    high = path.length - 1;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (path[mid - 1].t <= maxT) low = mid;
+      else high = mid - 1;
+    }
+    endIndex = Math.min(path.length - 1, low + 1);
+  }
+
+  for (let index = startIndex; index <= endIndex; index += 1) {
     const start = path[index - 1];
     const end = path[index];
     if (end.t < minT || start.t > maxT) continue;

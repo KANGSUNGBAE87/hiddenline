@@ -4,7 +4,7 @@ export type OverlapDifficultyId = "light" | "normal" | "complex" | "hard" | "mas
 export type LineDifficultyId = "easy" | "normal" | "hard";
 export type VisibilityLevelId = "easy" | "normal" | "hard";
 export type DifficultyId = LineDifficultyId | "expert";
-export type GeneratorVersion = "daily-v1";
+export type GeneratorVersion = "daily-v1" | "analytic-v2";
 export type LineType = "warmup" | "main" | "curve" | "precision";
 export type GeneratorProfileId = "gentle-warmup-v1" | "daily-main-normal-v1" | "curve-control-v1" | "precision-focus-v1";
 export type ScoringProfileId =
@@ -18,6 +18,25 @@ export type Viewport = { width: number; height: number };
 export type PathPoint = Point & {
   t: number;
   distance: number;
+  curvature?: number;
+  u?: number;
+};
+
+export type AnalyticCurveDefinition = {
+  kind: "analytic-harmonic-v1";
+  seed: string;
+  generatorVersion: "analytic-v2";
+  courseLengthId: CourseLengthId;
+  complexityLevel: OverlapDifficultyId;
+  start: Point;
+  end: Point;
+  amplitudePx: number;
+  frequencyScale: number;
+  coefficients: number[];
+  phases: number[];
+  minTurnRadiusPx: number;
+  sampleSpacingPx: number;
+  sourceSampleCount: number;
 };
 
 export type GeneratedPath = {
@@ -35,6 +54,7 @@ export type GeneratedPath = {
   viewport: Viewport;
   start: Point;
   end: Point;
+  curve?: AnalyticCurveDefinition;
   points: PathPoint[];
   totalLength: number;
   usedFallback: boolean;

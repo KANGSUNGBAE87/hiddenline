@@ -162,7 +162,35 @@ function curvatureDirectionChanges(points: Point[]): number {
   return changes;
 }
 
+function segmentLengths(points: Point[]): number[] {
+  return points.slice(1).map((point, index) => {
+    const previous = points[index];
+    return Math.hypot(point.x - previous.x, point.y - previous.y);
+  });
+}
+
 describe("path generator", () => {
+  test("generated path is sourced from one analytic curve definition", () => {
+    const daily = createDailyContext(new Date(2026, 5, 23));
+    const path = generatePath({
+      ...daily,
+      seed: "hiddenline-analytic-source-of-truth",
+      courseLengthId: "basic",
+      overlapDifficultyId: "complex",
+      visibilityLevel: "normal",
+      viewport,
+    });
+
+    expect(path.generatorVersion).toBe("analytic-v2");
+    expect(path.curve?.kind).toBe("analytic-harmonic-v1");
+    expect(path.curve?.seed).toBe(path.seed);
+    expect(path.curve?.start).toEqual({ x: path.start.x, y: path.start.y });
+    expect(path.curve?.end).toEqual({ x: path.end.x, y: path.end.y });
+    expect(path.curve?.sampleSpacingPx).toBe(0.5);
+    expect(path.curve?.coefficients.length).toBeGreaterThanOrEqual(2);
+    expect(path.curve?.phases.length).toBe(path.curve?.coefficients.length);
+  });
+
   test("course length controls normalized total path length", () => {
     const daily = createDailyContext(new Date(2026, 5, 21));
     const cases: Array<[CourseLengthId, number, number]> = [
@@ -189,17 +217,12 @@ describe("path generator", () => {
     }
   });
 
-  test("overlap difficulty controls self-crossing count without stitched sharp corners", () => {
+  test("curve complexity selector changes analytic profile without forcing self-crossings", () => {
     const daily = createDailyContext(new Date(2026, 5, 21));
-    const cases: Array<[OverlapDifficultyId, number, number]> = [
-      ["light", 0, 0],
-      ["normal", 1, 2],
-      ["complex", 3, 4],
-      ["hard", 5, 6],
-      ["master", 7, 12],
-    ];
+    const cases: OverlapDifficultyId[] = ["light", "normal", "complex", "hard", "master"];
+    let previousChecksum: string | null = null;
 
-    for (const [overlapDifficultyId, min, max] of cases) {
+    for (const overlapDifficultyId of cases) {
       const path = generatePath({
         ...daily,
         seed: `hiddenline-overlap:${overlapDifficultyId}`,
@@ -208,39 +231,38 @@ describe("path generator", () => {
         visibilityLevel: "normal",
         viewport,
       });
-      const intersections = countSelfIntersections(path.points);
 
-      expect(intersections, overlapDifficultyId).toBeGreaterThanOrEqual(min);
-      expect(intersections, overlapDifficultyId).toBeLessThanOrEqual(max);
-      expect(maxTurnAngle(path.points), overlapDifficultyId).toBeLessThan(0.9);
-      expect(minTurnRadius(path.points), overlapDifficultyId).toBeGreaterThan(0.05);
+      expect(path.curve?.complexityLevel, overlapDifficultyId).toBe(overlapDifficultyId);
+      expect(path.selfIntersectionCount, overlapDifficultyId).toBe(0);
+      expect(countSelfIntersections(path.points), overlapDifficultyId).toBe(0);
+      expect(hasSelfIntersection(path.points), overlapDifficultyId).toBe(false);
+      expect(maxTurnAngle(path.points), overlapDifficultyId).toBeLessThan(0.58);
+
+      const checksum = checksumPoints(path.points);
+      if (previousChecksum) expect(checksum, overlapDifficultyId).not.toBe(previousChecksum);
+      previousChecksum = checksum;
     }
   });
 
-  test("overlap difficulty uses broad loop patterns instead of high-frequency wiggles", () => {
+  test("analytic sampling uses arc length spacing and avoids stitched heading jumps", () => {
     const daily = createDailyContext(new Date(2026, 5, 22));
-    const cases: Array<[OverlapDifficultyId, number, number, number]> = [
-      ["light", 0, 8, 10],
-      ["normal", 1, 14, 5],
-      ["complex", 3, 20, 5],
-      ["hard", 5, 28, 4],
-      ["master", 7, 36, 4],
-    ];
+    const cases: OverlapDifficultyId[] = ["light", "normal", "complex", "hard", "master"];
 
-    for (const [overlapDifficultyId, minIntersections, maxCurvatureChanges, minRadius] of cases) {
+    for (const overlapDifficultyId of cases) {
       const path = generatePath({
         ...daily,
-        seed: `hiddenline-large-loop-pattern:${overlapDifficultyId}`,
+        seed: `hiddenline-analytic-spacing:${overlapDifficultyId}`,
         courseLengthId: "marathon",
         overlapDifficultyId,
         visibilityLevel: "normal",
         viewport,
       });
-      const intersections = countSelfIntersections(path.points);
+      const lengths = segmentLengths(path.points);
 
-      expect(intersections, overlapDifficultyId).toBeGreaterThanOrEqual(minIntersections);
-      expect(curvatureDirectionChanges(path.points), overlapDifficultyId).toBeLessThanOrEqual(maxCurvatureChanges);
-      expect(minTurnRadius(path.points), overlapDifficultyId).toBeGreaterThan(minRadius);
+      expect(Math.max(...lengths), overlapDifficultyId).toBeLessThanOrEqual(1.25);
+      expect(maxTurnAngle(path.points), overlapDifficultyId).toBeLessThan(0.58);
+      expect(minTurnRadius(path.points), overlapDifficultyId).toBeGreaterThan(1.8);
+      expect(curvatureDirectionChanges(path.points), overlapDifficultyId).toBeLessThanOrEqual(80);
     }
   });
 
@@ -270,7 +292,7 @@ describe("path generator", () => {
     }
   });
 
-  test("endpoint anchoring does not insert straight stitched ramps", () => {
+  test("endpoint anchoring is part of the same curve, not stitched ramps", () => {
     const daily = createDailyContext(new Date(2026, 5, 22));
     const path = generatePath({
       ...daily,
@@ -281,8 +303,10 @@ describe("path generator", () => {
       viewport,
     });
 
-    expect(maxHeadingDelta(path.points.slice(0, 20))).toBeGreaterThan(0.001);
-    expect(maxHeadingDelta(path.points.slice(-20))).toBeGreaterThan(0.001);
+    expect(path.curve?.start).toEqual({ x: path.points[0].x, y: path.points[0].y });
+    expect(path.curve?.end).toEqual({ x: path.points.at(-1)?.x, y: path.points.at(-1)?.y });
+    expect(maxHeadingDelta(path.points.slice(0, 32))).toBeLessThan(0.24);
+    expect(maxHeadingDelta(path.points.slice(-32))).toBeLessThan(0.24);
   });
 
   test("deterministic seed generates the same path", () => {
@@ -309,7 +333,7 @@ describe("path generator", () => {
     }
   });
 
-  test("generated path stays within safe margin and respects default overlap target", () => {
+  test("generated path stays within safe margin and avoids self-intersection by default", () => {
     const daily = createDailyContext(new Date(2026, 5, 13));
     const path = generatePath({ ...daily, viewport });
     const margin = GAMEPLAY_DEFAULTS.safeMarginPx;
@@ -321,8 +345,8 @@ describe("path generator", () => {
       expect(point.y).toBeLessThanOrEqual(viewport.height - margin);
     }
 
-    expect(countSelfIntersections(path.points)).toBeGreaterThanOrEqual(3);
-    expect(countSelfIntersections(path.points)).toBeLessThanOrEqual(4);
+    expect(countSelfIntersections(path.points)).toBe(0);
+    expect(hasSelfIntersection(path.points)).toBe(false);
   });
 
   test("locked Standard fixture stays deterministic for the approved seed without pinning old coordinates", () => {
@@ -377,7 +401,7 @@ describe("path generator", () => {
     expect(curve.totalLength).toBeGreaterThan(warmup.totalLength * 0.9);
   });
 
-  test("legacy line difficulty maps to overlap count instead of course length", () => {
+  test("legacy line difficulty maps to analytic curve complexity instead of course length", () => {
     const daily = createDailyContext(new Date(2026, 5, 13));
     const base = {
       ...daily,
@@ -393,17 +417,17 @@ describe("path generator", () => {
 
     expect(easyLine.points).not.toEqual(normalLine.points);
     expect(normalLine.points).not.toEqual(hardLine.points);
-    expect(countSelfIntersections(easyLine.points)).toBeGreaterThanOrEqual(1);
-    expect(countSelfIntersections(easyLine.points)).toBeLessThanOrEqual(2);
-    expect(countSelfIntersections(normalLine.points)).toBeGreaterThanOrEqual(3);
-    expect(countSelfIntersections(normalLine.points)).toBeLessThanOrEqual(4);
-    expect(countSelfIntersections(hardLine.points)).toBeGreaterThanOrEqual(5);
-    expect(countSelfIntersections(hardLine.points)).toBeLessThanOrEqual(6);
+    expect(easyLine.curve?.complexityLevel).toBe("normal");
+    expect(normalLine.curve?.complexityLevel).toBe("complex");
+    expect(hardLine.curve?.complexityLevel).toBe("hard");
+    expect(countSelfIntersections(easyLine.points)).toBe(0);
+    expect(countSelfIntersections(normalLine.points)).toBe(0);
+    expect(countSelfIntersections(hardLine.points)).toBe(0);
     expect(easyLine.courseLengthId).toBe(normalLine.courseLengthId);
     expect(normalLine.courseLengthId).toBe(hardLine.courseLengthId);
   });
 
-  test("hard line difficulty can generate an actual self-crossing path", () => {
+  test("hard line difficulty stays on one fair analytic progression path", () => {
     const daily = createDailyContext(new Date(2026, 5, 13));
     const hardLine = generatePath({
       ...daily,
@@ -415,7 +439,9 @@ describe("path generator", () => {
       viewport,
     });
 
-    expect(hasSelfIntersection(hardLine.points)).toBe(true);
+    expect(hardLine.curve?.kind).toBe("analytic-harmonic-v1");
+    expect(hasSelfIntersection(hardLine.points)).toBe(false);
+    expect(maxTurnAngle(hardLine.points)).toBeLessThan(0.58);
   });
 
   test("legacy line families now map to course length while overlap remains separate", () => {
