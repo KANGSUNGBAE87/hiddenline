@@ -10,8 +10,29 @@ type PathRecapProps = {
 
 function toPathData(points: PathPoint[]): string {
   if (points.length === 0) return "";
-  const [first, ...rest] = points;
-  return [`M ${first.x.toFixed(1)} ${first.y.toFixed(1)}`, ...rest.map((point) => `L ${point.x.toFixed(1)} ${point.y.toFixed(1)}`)].join(" ");
+  const format = (value: number) => value.toFixed(1);
+  const commands = [`M ${format(points[0].x)} ${format(points[0].y)}`];
+
+  if (points.length === 2) {
+    const controlX = (points[0].x + points[1].x) / 2;
+    const controlY = (points[0].y + points[1].y) / 2;
+    commands.push(`Q ${format(controlX)} ${format(controlY)} ${format(points[1].x)} ${format(points[1].y)}`);
+    return commands.join(" ");
+  }
+
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    const midX = (current.x + next.x) / 2;
+    const midY = (current.y + next.y) / 2;
+    commands.push(`Q ${format(current.x)} ${format(current.y)} ${format(midX)} ${format(midY)}`);
+  }
+
+  const previous = points[points.length - 2];
+  const last = points[points.length - 1];
+  commands.push(`Q ${format(previous.x)} ${format(previous.y)} ${format(last.x)} ${format(last.y)}`);
+
+  return commands.join(" ");
 }
 
 function completedPoints(path: PathPoint[], progressT: number): PathPoint[] {

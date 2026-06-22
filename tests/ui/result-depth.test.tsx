@@ -36,4 +36,11 @@ describe("Result depth v2", () => {
     expect(screen.queryByRole("button", { name: "더 많은 선택" })).not.toBeInTheDocument();
     expect(homeButton).toHaveClass("secondary-button--quiet");
   });
+
+  test("renders the path recap as a smoothed curve instead of straight stitched segments", () => {
+    render(<ResultScreen record={createRecord({ progressMax: 0.92 })} previousBest={null} presetId="intro" i18n={createI18n("ko")} onRetry={vi.fn()} onHome={vi.fn()} onSelectPreset={vi.fn()} onDailyEntry={vi.fn()} />);
+    const completedPath = document.querySelector(".path-recap__completed");
+
+    expect(completedPath?.getAttribute("d")).toContain("Q");
+  });
 });
