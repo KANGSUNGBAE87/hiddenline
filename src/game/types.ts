@@ -14,6 +14,7 @@ export type ScoringProfileId =
   | "precision-accuracy-v1";
 export type Point = { x: number; y: number };
 export type Viewport = { width: number; height: number };
+export type PathLayout = "single-flow" | "two-lane-serpentine" | "three-lane-serpentine";
 
 export type PathPoint = Point & {
   t: number;
@@ -23,17 +24,15 @@ export type PathPoint = Point & {
 };
 
 export type AnalyticCurveDefinition = {
-  kind: "analytic-harmonic-v1";
+  kind: "serpentine-spline-v1";
   seed: string;
   generatorVersion: "analytic-v2";
   courseLengthId: CourseLengthId;
   complexityLevel: OverlapDifficultyId;
+  layout: PathLayout;
   start: Point;
   end: Point;
-  amplitudePx: number;
-  frequencyScale: number;
-  coefficients: number[];
-  phases: number[];
+  targetLengthRangePx: { min: number; max: number };
   minTurnRadiusPx: number;
   sampleSpacingPx: number;
   sourceSampleCount: number;

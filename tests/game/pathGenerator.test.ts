@@ -7,6 +7,7 @@ import { hasSelfIntersection } from "../../src/game/pathGeometry";
 import type { CourseLengthId, GeneratorProfileId, LineDifficultyId, LineType, OverlapDifficultyId, Point } from "../../src/game/types";
 
 const viewport = { width: 390, height: 560 };
+const playViewport = { width: 390, height: 740 };
 const lockedFixtureSeed = "0x6f1c2a9d4e11b7c3";
 
 function checksumPoints(points: Point[]): string {
@@ -169,36 +170,84 @@ function segmentLengths(points: Point[]): number[] {
   });
 }
 
+function maxHeadingChangeOverDistance(points: Point[], distancePx: number): number {
+  let maxDelta = 0;
+
+  for (let start = 0; start < points.length - 2; start += 1) {
+    let end = start + 1;
+    while (end < points.length - 1) {
+      const traveled = Math.hypot(points[end].x - points[start].x, points[end].y - points[start].y);
+      if (traveled >= distancePx) break;
+      end += 1;
+    }
+    if (end >= points.length - 1) break;
+
+    const before = points[Math.max(0, start - 1)];
+    const after = points[Math.min(points.length - 1, end + 1)];
+    const first = Math.atan2(points[start].y - before.y, points[start].x - before.x);
+    const second = Math.atan2(after.y - points[end].y, after.x - points[end].x);
+    const delta = Math.abs(Math.atan2(Math.sin(second - first), Math.cos(second - first)));
+    maxDelta = Math.max(maxDelta, delta);
+  }
+
+  return maxDelta;
+}
+
+function inflectionArcGaps(points: Array<Point & { distance?: number }>): number[] {
+  const distances: number[] = [];
+  let previousSign = 0;
+  let previousDistance: number | null = null;
+
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const next = points[index + 1];
+    const cross = (current.x - previous.x) * (next.y - current.y) - (current.y - previous.y) * (next.x - current.x);
+    if (Math.abs(cross) < 0.08) continue;
+    const sign = Math.sign(cross);
+    if (previousSign !== 0 && sign !== previousSign) {
+      const currentDistance = current.distance ?? 0;
+      if (previousDistance !== null) distances.push(currentDistance - previousDistance);
+      previousDistance = currentDistance;
+    } else if (previousSign === 0) {
+      previousDistance = current.distance ?? 0;
+    }
+    previousSign = sign;
+  }
+
+  return distances;
+}
+
 describe("path generator", () => {
-  test("generated path is sourced from one analytic curve definition", () => {
+  test("generated path is sourced from one serpentine spline definition", () => {
     const daily = createDailyContext(new Date(2026, 5, 23));
     const path = generatePath({
       ...daily,
-      seed: "hiddenline-analytic-source-of-truth",
+      seed: "hiddenline-serpentine-source-of-truth",
       courseLengthId: "basic",
       overlapDifficultyId: "complex",
       visibilityLevel: "normal",
-      viewport,
+      viewport: playViewport,
     });
 
     expect(path.generatorVersion).toBe("analytic-v2");
-    expect(path.curve?.kind).toBe("analytic-harmonic-v1");
+    expect(path.curve?.kind).toBe("serpentine-spline-v1");
     expect(path.curve?.seed).toBe(path.seed);
     expect(path.curve?.start).toEqual({ x: path.start.x, y: path.start.y });
     expect(path.curve?.end).toEqual({ x: path.end.x, y: path.end.y });
-    expect(path.curve?.sampleSpacingPx).toBe(0.5);
-    expect(path.curve?.coefficients.length).toBeGreaterThanOrEqual(2);
-    expect(path.curve?.phases.length).toBe(path.curve?.coefficients.length);
+    expect(path.curve?.sampleSpacingPx).toBe(3.5);
+    expect(path.curve?.layout).toBe("two-lane-serpentine");
+    expect(path.curve?.targetLengthRangePx).toEqual({ min: 850, max: 1200 });
   });
 
-  test("course length controls normalized total path length", () => {
+  test("course length selects CSS pixel ranges without treating 2000px as a target", () => {
     const daily = createDailyContext(new Date(2026, 5, 21));
     const cases: Array<[CourseLengthId, number, number]> = [
-      ["short", 1.42, 1.74],
-      ["basic", 1.86, 2.25],
-      ["long", 2.55, 3.15],
-      ["longRun", 3.45, 4.35],
-      ["marathon", 4.65, 5.65],
+      ["short", 600, 900],
+      ["basic", 850, 1200],
+      ["long", 1000, 1450],
+      ["longRun", 1300, 1750],
+      ["marathon", 1650, 2000],
     ];
 
     for (const [courseLengthId, min, max] of cases) {
@@ -208,12 +257,12 @@ describe("path generator", () => {
         courseLengthId,
         overlapDifficultyId: "light",
         visibilityLevel: "normal",
-        viewport,
+        viewport: playViewport,
       });
-      const normalizedLength = path.totalLength / Math.min(viewport.width, viewport.height);
 
-      expect(normalizedLength, courseLengthId).toBeGreaterThanOrEqual(min);
-      expect(normalizedLength, courseLengthId).toBeLessThanOrEqual(max);
+      expect(path.totalLength, courseLengthId).toBeGreaterThanOrEqual(min);
+      expect(path.totalLength, courseLengthId).toBeLessThanOrEqual(max);
+      expect(path.totalLength, courseLengthId).toBeLessThanOrEqual(2000);
     }
   });
 
@@ -244,26 +293,47 @@ describe("path generator", () => {
     }
   });
 
-  test("analytic sampling uses arc length spacing and avoids stitched heading jumps", () => {
+  test("arc length sampling uses 3 to 4px spacing and avoids stitched heading jumps", () => {
     const daily = createDailyContext(new Date(2026, 5, 22));
     const cases: OverlapDifficultyId[] = ["light", "normal", "complex", "hard", "master"];
 
     for (const overlapDifficultyId of cases) {
       const path = generatePath({
         ...daily,
-        seed: `hiddenline-analytic-spacing:${overlapDifficultyId}`,
+        seed: `hiddenline-serpentine-spacing:${overlapDifficultyId}`,
         courseLengthId: "marathon",
         overlapDifficultyId,
         visibilityLevel: "normal",
-        viewport,
+        viewport: playViewport,
       });
       const lengths = segmentLengths(path.points);
 
-      expect(Math.max(...lengths), overlapDifficultyId).toBeLessThanOrEqual(1.25);
+      expect(Math.max(...lengths), overlapDifficultyId).toBeLessThanOrEqual(4.5);
+      expect(path.points.length, overlapDifficultyId).toBeLessThanOrEqual(768);
       expect(maxTurnAngle(path.points), overlapDifficultyId).toBeLessThan(0.58);
-      expect(minTurnRadius(path.points), overlapDifficultyId).toBeGreaterThan(1.8);
-      expect(curvatureDirectionChanges(path.points), overlapDifficultyId).toBeLessThanOrEqual(80);
+      expect(minTurnRadius(path.points), overlapDifficultyId).toBeGreaterThan(52);
+      expect(curvatureDirectionChanges(path.points), overlapDifficultyId).toBeLessThanOrEqual(8);
+      expect(maxHeadingChangeOverDistance(path.points, 32), overlapDifficultyId).toBeLessThan(Math.PI / 6);
     }
+  });
+
+  test("three-lane serpentine reaches long focus length without micro wiggles on 390x740", () => {
+    const daily = createDailyContext(new Date(2026, 5, 23));
+    const path = generatePath({
+      ...daily,
+      seed: "hiddenline-three-lane-serpentine-capacity",
+      courseLengthId: "marathon",
+      overlapDifficultyId: "master",
+      visibilityLevel: "normal",
+      viewport: playViewport,
+    });
+
+    expect(path.curve?.layout).toBe("three-lane-serpentine");
+    expect(path.totalLength).toBeGreaterThanOrEqual(1800);
+    expect(path.totalLength).toBeLessThanOrEqual(2000);
+    expect(minTurnRadius(path.points)).toBeGreaterThanOrEqual(52);
+    expect(inflectionArcGaps(path.points).every((gap) => gap >= 140)).toBe(true);
+    expect(countSelfIntersections(path.points)).toBe(0);
   });
 
   test("generated paths start and end near opposite sides of the safe play rectangle", () => {
@@ -439,7 +509,7 @@ describe("path generator", () => {
       viewport,
     });
 
-    expect(hardLine.curve?.kind).toBe("analytic-harmonic-v1");
+    expect(hardLine.curve?.kind).toBe("serpentine-spline-v1");
     expect(hasSelfIntersection(hardLine.points)).toBe(false);
     expect(maxTurnAngle(hardLine.points)).toBeLessThan(0.58);
   });

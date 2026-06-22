@@ -107,12 +107,16 @@ describe("session machine", () => {
 
   test("warning meter increases and can recover", () => {
     const machine = createSessionMachine(path);
+    const warningIndex = Math.max(4, Math.floor(path.points.length * 0.03));
+    const firstRecoveryIndex = Math.min(path.points.length - 1, warningIndex + 4);
+    const secondRecoveryIndex = Math.min(path.points.length - 1, firstRecoveryIndex + 4);
+
     machine.pointerDown(path.start, 0);
-    machine.pointerMove(offsetNormal(path, 64, path.rules.pathWidthPx + 8), 100);
+    machine.pointerMove(offsetNormal(path, warningIndex, path.rules.pathWidthPx + 8), 100);
     expect(machine.getSnapshot().status).toBe("warning");
 
-    machine.pointerMove(path.points[96], 300);
-    machine.pointerMove(path.points[128], 650);
+    machine.pointerMove(path.points[firstRecoveryIndex], 300);
+    machine.pointerMove(path.points[secondRecoveryIndex], 650);
     expect(machine.getSnapshot().warningMeter).toBeLessThan(100);
   });
 

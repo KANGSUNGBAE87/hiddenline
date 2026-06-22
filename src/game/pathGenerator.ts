@@ -1,6 +1,6 @@
-import { COURSE_LENGTHS, DIFFICULTIES, GAMEPLAY_DEFAULTS, OVERLAP_DIFFICULTIES } from "./config";
+import { DIFFICULTIES, GAMEPLAY_DEFAULTS } from "./config";
 import { clamp, distance } from "./pathGeometry";
-import { createRng, deriveSeed64 } from "./random";
+import { createRng } from "./random";
 import type {
   AnalyticCurveDefinition,
   CourseLengthId,
@@ -10,6 +10,7 @@ import type {
   GeneratorProfileId,
   LineDifficultyId,
   OverlapDifficultyId,
+  PathLayout,
   PathPoint,
   Point,
   Viewport,
@@ -28,9 +29,18 @@ type PathGenerationInput = Omit<DailyContext, "difficulty"> & {
   maxAttempts?: number;
 };
 
-type SafeEdge = "left" | "right" | "top" | "bottom";
-type EndpointPair = { start: Point; end: Point; axis: "horizontal" | "vertical" };
+type DraftPoint = Point;
 type RawCurvePoint = Point & { u: number; distance: number };
+type SerpentineBlueprint = {
+  layout: PathLayout;
+  laneCount: number;
+  radiusPx: number;
+  xInsetPx: number;
+  yBias: number;
+  flipX: boolean;
+  flipY: boolean;
+  targetLengthRangePx: { min: number; max: number };
+};
 type AnalyticCandidate = {
   curve: AnalyticCurveDefinition;
   points: PathPoint[];
@@ -38,16 +48,21 @@ type AnalyticCandidate = {
   selfIntersectionCount: number;
   usedFallback: boolean;
 };
-type CurveBasis = Pick<
-  AnalyticCurveDefinition,
-  "coefficients" | "phases" | "frequencyScale" | "minTurnRadiusPx" | "sampleSpacingPx" | "sourceSampleCount"
->;
 
-const TWO_PI = Math.PI * 2;
-const SAMPLE_SPACING_PX = 0.5;
+const SAMPLE_SPACING_PX = 3.5;
+const RAW_SPACING_PX = 2;
 const MIN_SAMPLE_COUNT = 128;
-const MAX_SAMPLE_COUNT = 5000;
+const MAX_SAMPLE_COUNT = 768;
 const MAX_TURN_ANGLE_RAD = 0.58;
+const ABSOLUTE_MAX_LENGTH_PX = 2000;
+
+const COURSE_LENGTH_RANGES_PX: Record<CourseLengthId, { min: number; max: number }> = {
+  short: { min: 600, max: 900 },
+  basic: { min: 850, max: 1200 },
+  long: { min: 1000, max: 1450 },
+  longRun: { min: 1300, max: 1750 },
+  marathon: { min: 1650, max: ABSOLUTE_MAX_LENGTH_PX },
+};
 
 const overlapByLineDifficulty: Record<LineDifficultyId, OverlapDifficultyId> = {
   easy: "normal",
@@ -62,23 +77,20 @@ const courseByLegacyLineType: Record<NonNullable<GeneratedPath["lineType"]>, Cou
   precision: "marathon",
 };
 
-const courseFrequencyBase: Record<CourseLengthId, number> = {
-  short: 1.05,
-  basic: 1.42,
-  long: 1.95,
-  longRun: 2.55,
-  marathon: 3.35,
+const overlapRank: Record<OverlapDifficultyId, number> = {
+  light: 0,
+  normal: 1,
+  complex: 2,
+  hard: 3,
+  master: 4,
 };
 
-const complexityProfiles: Record<
-  OverlapDifficultyId,
-  { harmonicCount: number; frequencyBonus: number; amplitudeMultiplier: number }
-> = {
-  light: { harmonicCount: 2, frequencyBonus: -0.16, amplitudeMultiplier: 0.86 },
-  normal: { harmonicCount: 3, frequencyBonus: 0, amplitudeMultiplier: 0.96 },
-  complex: { harmonicCount: 3, frequencyBonus: 0.26, amplitudeMultiplier: 1.05 },
-  hard: { harmonicCount: 4, frequencyBonus: 0.48, amplitudeMultiplier: 1.14 },
-  master: { harmonicCount: 5, frequencyBonus: 0.7, amplitudeMultiplier: 1.22 },
+const courseLayout: Record<CourseLengthId, { layout: PathLayout; laneCount: number; baseRadiusPx: number; radiusLiftPx: number; xInsetBasePx: number }> = {
+  short: { layout: "single-flow", laneCount: 1, baseRadiusPx: 0, radiusLiftPx: 0, xInsetBasePx: 0 },
+  basic: { layout: "two-lane-serpentine", laneCount: 3, baseRadiusPx: 52, radiusLiftPx: 1.4, xInsetBasePx: 4 },
+  long: { layout: "two-lane-serpentine", laneCount: 3, baseRadiusPx: 72, radiusLiftPx: 1.8, xInsetBasePx: 4 },
+  longRun: { layout: "two-lane-serpentine", laneCount: 5, baseRadiusPx: 54, radiusLiftPx: 1.3, xInsetBasePx: 10 },
+  marathon: { layout: "three-lane-serpentine", laneCount: 5, baseRadiusPx: 74, radiusLiftPx: 1.5, xInsetBasePx: 0 },
 };
 
 function maxTurnAngle(points: Point[]): number {
@@ -148,105 +160,67 @@ function safeMargin(viewport: Viewport): number {
   return Math.min(GAMEPLAY_DEFAULTS.safeMarginPx, Math.max(16, Math.min(viewport.width, viewport.height) * 0.18));
 }
 
-function createBoundaryEndpointPair(rng: () => number, viewport: Viewport, margin: number): EndpointPair {
-  const width = Math.max(1, viewport.width - margin * 2);
-  const height = Math.max(1, viewport.height - margin * 2);
-  const horizontal = rng() < 0.5;
-  const startOnLowSide = rng() < 0.5;
-  const startEdge: SafeEdge = horizontal
-    ? startOnLowSide ? "left" : "right"
-    : startOnLowSide ? "top" : "bottom";
-  const endEdge: SafeEdge =
-    startEdge === "left" ? "right" :
-      startEdge === "right" ? "left" :
-        startEdge === "top" ? "bottom" : "top";
-  const pointOnEdge = (edge: SafeEdge): Point => {
-    if (edge === "left" || edge === "right") {
-      return {
-        x: edge === "left" ? margin : viewport.width - margin,
-        y: margin + height * (0.18 + rng() * 0.64),
-      };
-    }
-
-    return {
-      x: margin + width * (0.18 + rng() * 0.64),
-      y: edge === "top" ? margin : viewport.height - margin,
-    };
-  };
-
-  return { start: pointOnEdge(startEdge), end: pointOnEdge(endEdge), axis: horizontal ? "horizontal" : "vertical" };
-}
-
 function allInsideSafeBox(points: Point[], viewport: Viewport, margin: number): boolean {
   return points.every(
     (point) =>
       Number.isFinite(point.x) &&
       Number.isFinite(point.y) &&
-      point.x >= margin &&
-      point.x <= viewport.width - margin &&
-      point.y >= margin &&
-      point.y <= viewport.height - margin,
+      point.x >= margin - 0.01 &&
+      point.x <= viewport.width - margin + 0.01 &&
+      point.y >= margin - 0.01 &&
+      point.y <= viewport.height - margin + 0.01,
   );
 }
 
-function normalizeCoefficients(values: number[]): number[] {
-  const total = values.reduce((sum, value) => sum + Math.abs(value), 0);
-  if (total < 0.001) return values.map((_, index) => (index === 0 ? 1 : 0));
-  return values.map((value) => value / total);
+function appendPoint(points: DraftPoint[], point: Point): void {
+  const previous = points.at(-1);
+  if (previous && distance(previous, point) < 0.001) return;
+  points.push(point);
 }
 
-function createCoefficients(rng: () => number, harmonicCount: number): number[] {
-  const values = Array.from({ length: harmonicCount }, (_, index) => {
-    const decay = 1 / Math.pow(index + 1, 0.52);
-    return (rng() * 2 - 1) * decay;
+function appendLine(points: DraftPoint[], to: Point): void {
+  const from = points.at(-1);
+  if (!from) {
+    appendPoint(points, to);
+    return;
+  }
+
+  const length = distance(from, to);
+  const steps = Math.max(1, Math.ceil(length / RAW_SPACING_PX));
+
+  for (let step = 1; step <= steps; step += 1) {
+    const t = step / steps;
+    appendPoint(points, {
+      x: from.x + (to.x - from.x) * t,
+      y: from.y + (to.y - from.y) * t,
+    });
+  }
+}
+
+function appendArc(points: DraftPoint[], center: Point, radiusPx: number, startAngle: number, endAngle: number): void {
+  const delta = endAngle - startAngle;
+  const arcLength = Math.abs(delta) * radiusPx;
+  const steps = Math.max(8, Math.ceil(arcLength / RAW_SPACING_PX));
+
+  for (let step = 1; step <= steps; step += 1) {
+    const t = step / steps;
+    const angle = startAngle + delta * t;
+    appendPoint(points, {
+      x: center.x + Math.cos(angle) * radiusPx,
+      y: center.y + Math.sin(angle) * radiusPx,
+    });
+  }
+}
+
+function withDistances(points: DraftPoint[]): RawCurvePoint[] {
+  let traveled = 0;
+  const raw = points.map((point, index) => {
+    if (index > 0) traveled += distance(points[index - 1], point);
+    return { ...point, distance: traveled, u: 0 };
   });
 
-  if (values.every((value) => Math.abs(value) < 0.08)) {
-    values[0] = 0.72;
-    if (values.length > 1) values[1] = -0.28;
-  }
-
-  return normalizeCoefficients(values);
-}
-
-function createPhases(rng: () => number, harmonicCount: number): number[] {
-  return Array.from({ length: harmonicCount }, () => rng() * TWO_PI);
-}
-
-function evaluateCurve(curve: AnalyticCurveDefinition, u: number): Point {
-  const clampedU = clamp(u, 0, 1);
-  const dx = curve.end.x - curve.start.x;
-  const dy = curve.end.y - curve.start.y;
-  const chord = Math.max(1, Math.hypot(dx, dy));
-  const tangent = { x: dx / chord, y: dy / chord };
-  const normal = { x: -tangent.y, y: tangent.x };
-  const envelope = Math.sin(Math.PI * clampedU) ** 2;
-  const wave = curve.coefficients.reduce((sum, coefficient, index) => {
-    const harmonic = index + 1;
-    return sum + coefficient * Math.sin(TWO_PI * harmonic * curve.frequencyScale * clampedU + curve.phases[index]);
-  }, 0);
-  const lateral = curve.amplitudePx * envelope * wave;
-  const along = chord * clampedU;
-
-  return {
-    x: curve.start.x + tangent.x * along + normal.x * lateral,
-    y: curve.start.y + tangent.y * along + normal.y * lateral,
-  };
-}
-
-function sampleRawCurve(curve: AnalyticCurveDefinition): RawCurvePoint[] {
-  const count = Math.max(2, curve.sourceSampleCount);
-  const raw: RawCurvePoint[] = [];
-  let traveled = 0;
-
-  for (let index = 0; index < count; index += 1) {
-    const u = index / (count - 1);
-    const point = evaluateCurve(curve, u);
-    if (index > 0) traveled += distance(raw[index - 1], point);
-    raw.push({ ...point, u, distance: traveled });
-  }
-
-  return raw;
+  const totalLength = raw.at(-1)?.distance ?? 0;
+  return raw.map((point) => ({ ...point, u: totalLength <= 0 ? 0 : point.distance / totalLength }));
 }
 
 function interpolateRawPoint(start: RawCurvePoint, end: RawCurvePoint, targetDistance: number): RawCurvePoint {
@@ -309,181 +283,145 @@ function resampleRawByArcLength(raw: RawCurvePoint[], spacingPx: number): PathPo
   return addCurvature(points);
 }
 
-function rawLength(raw: RawCurvePoint[]): number {
-  return raw[raw.length - 1]?.distance ?? 0;
-}
-
-function createCurveBasis(
-  rng: () => number,
-  courseLengthId: CourseLengthId,
-  overlapDifficultyId: OverlapDifficultyId,
-  attemptIndex: number,
-): CurveBasis {
-  const course = COURSE_LENGTHS[courseLengthId];
-  const profile = complexityProfiles[overlapDifficultyId];
-  const sourceSampleCount = Math.max(512, Math.min(1280, course.sampleCount * 2));
-  const frequencyJitter = (rng() - 0.5) * 0.16;
-  const attemptFrequencyLift = Math.floor(attemptIndex / 5) * 0.22;
-
-  return {
-    frequencyScale: Math.max(0.62, courseFrequencyBase[courseLengthId] + profile.frequencyBonus + attemptFrequencyLift + frequencyJitter),
-    coefficients: createCoefficients(rng, profile.harmonicCount),
-    phases: createPhases(rng, profile.harmonicCount),
-    minTurnRadiusPx: OVERLAP_DIFFICULTIES[overlapDifficultyId].minTurnRadiusPx,
-    sampleSpacingPx: SAMPLE_SPACING_PX,
-    sourceSampleCount,
-  };
-}
-
-function buildCurve(
-  seed: string,
-  endpoints: EndpointPair,
-  courseLengthId: CourseLengthId,
-  overlapDifficultyId: OverlapDifficultyId,
-  basis: CurveBasis,
-  amplitudePx: number,
-): AnalyticCurveDefinition {
-  return {
-    kind: "analytic-harmonic-v1",
-    seed,
-    generatorVersion: "analytic-v2",
-    courseLengthId,
-    complexityLevel: overlapDifficultyId,
-    start: endpoints.start,
-    end: endpoints.end,
-    amplitudePx,
-    frequencyScale: basis.frequencyScale,
-    coefficients: basis.coefficients,
-    phases: basis.phases,
-    minTurnRadiusPx: basis.minTurnRadiusPx,
-    sampleSpacingPx: basis.sampleSpacingPx,
-    sourceSampleCount: basis.sourceSampleCount,
-  };
-}
-
-function tuneAmplitudeForTarget(
+function createBlueprint(
   seed: string,
   viewport: Viewport,
-  endpoints: EndpointPair,
   courseLengthId: CourseLengthId,
   overlapDifficultyId: OverlapDifficultyId,
-  attemptIndex: number,
-): AnalyticCurveDefinition {
-  const rng = createRng(`${seed}:${attemptIndex}:analytic-v2`);
-  const profile = complexityProfiles[overlapDifficultyId];
-  const basis = createCurveBasis(rng, courseLengthId, overlapDifficultyId, attemptIndex);
-  const minDimension = Math.min(viewport.width, viewport.height);
+): SerpentineBlueprint {
+  const rng = createRng(`${seed}:serpentine-spline-v1:${courseLengthId}:${overlapDifficultyId}`);
+  const layout = courseLayout[courseLengthId];
   const margin = safeMargin(viewport);
-  const targetLengthPx = COURSE_LENGTHS[courseLengthId].targetNormalizedLength * minDimension;
-  const maxAmplitudePx = minDimension * 1.28 * profile.amplitudeMultiplier;
-  let low = 0;
-  let high = maxAmplitudePx;
-  let bestCurve = buildCurve(seed, endpoints, courseLengthId, overlapDifficultyId, basis, 0);
-  let bestScore = Number.POSITIVE_INFINITY;
+  const safeHeight = Math.max(1, viewport.height - margin * 2);
+  const rank = overlapRank[overlapDifficultyId];
+  const turnCount = Math.max(0, layout.laneCount - 1);
+  const heightCap = turnCount === 0 ? 0 : Math.max(42, (safeHeight - 28) / (turnCount * 2));
+  const radiusPx = turnCount === 0 ? 0 : clamp(layout.baseRadiusPx + rank * layout.radiusLiftPx, 52.5, heightCap);
 
-  for (let pass = 0; pass < 16; pass += 1) {
-    const amplitudePx = (low + high) / 2;
-    const curve = buildCurve(seed, endpoints, courseLengthId, overlapDifficultyId, basis, amplitudePx);
-    const raw = sampleRawCurve(curve);
-    const inside = allInsideSafeBox(raw, viewport, margin);
-    const length = rawLength(raw);
-    const score = Math.abs(length - targetLengthPx) + (inside ? 0 : targetLengthPx * 2);
+  return {
+    layout: layout.layout,
+    laneCount: layout.laneCount,
+    radiusPx,
+    xInsetPx: turnCount === 0 ? 0 : layout.xInsetBasePx + Math.round(rng() * 3),
+    yBias: 0.38 + rng() * 0.24,
+    flipX: rng() < 0.5,
+    flipY: rng() < 0.5,
+    targetLengthRangePx: COURSE_LENGTH_RANGES_PX[courseLengthId],
+  };
+}
 
-    if (inside && score < bestScore) {
-      bestCurve = curve;
-      bestScore = score;
-    }
+function transformPoint(point: Point, viewport: Viewport, blueprint: SerpentineBlueprint): Point {
+  return {
+    x: blueprint.flipX ? viewport.width - point.x : point.x,
+    y: blueprint.flipY ? viewport.height - point.y : point.y,
+  };
+}
 
-    if (!inside || length > targetLengthPx) high = amplitudePx;
-    else low = amplitudePx;
+function createSingleFlowDraft(seed: string, viewport: Viewport, margin: number, blueprint: SerpentineBlueprint): DraftPoint[] {
+  const rng = createRng(`${seed}:serpentine-single-flow`);
+  const safeWidth = viewport.width - margin * 2;
+  const safeHeight = viewport.height - margin * 2;
+  const startX = margin + safeWidth * (0.28 + rng() * 0.16);
+  const endX = margin + safeWidth * (0.56 + rng() * 0.16);
+  const bow = safeWidth * (0.08 + rng() * 0.04) * (rng() < 0.5 ? -1 : 1);
+  const points: DraftPoint[] = [];
+  const steps = Math.max(64, Math.ceil(safeHeight / RAW_SPACING_PX));
+
+  for (let step = 0; step <= steps; step += 1) {
+    const t = step / steps;
+    const envelope = Math.sin(Math.PI * t) ** 2;
+    const x = clamp(startX + (endX - startX) * t + bow * envelope, margin, viewport.width - margin);
+    const y = margin + safeHeight * t;
+    appendPoint(points, transformPoint({ x, y }, viewport, blueprint));
   }
 
-  return bestCurve;
+  return points;
 }
 
-function createAnalyticCandidate(
+function createHorizontalSerpentineDraft(viewport: Viewport, margin: number, blueprint: SerpentineBlueprint): DraftPoint[] {
+  const left = margin + blueprint.xInsetPx;
+  const right = viewport.width - margin - blueprint.xInsetPx;
+  const radiusPx = blueprint.radiusPx;
+  const turnCount = blueprint.laneCount - 1;
+  const laneSpan = turnCount * radiusPx * 2;
+  const safeHeight = viewport.height - margin * 2;
+  const freeHeight = Math.max(0, safeHeight - laneSpan);
+  const topLaneY = margin + freeHeight * blueprint.yBias;
+  const points: DraftPoint[] = [];
+
+  appendPoint(points, { x: left, y: topLaneY });
+
+  for (let lane = 0; lane < blueprint.laneCount; lane += 1) {
+    const y = topLaneY + lane * radiusPx * 2;
+    const movingRight = lane % 2 === 0;
+    const finalLane = lane === blueprint.laneCount - 1;
+
+    if (movingRight) {
+      appendLine(points, { x: finalLane ? right : right - radiusPx, y });
+      if (!finalLane) appendArc(points, { x: right - radiusPx, y: y + radiusPx }, radiusPx, -Math.PI / 2, Math.PI / 2);
+    } else {
+      appendLine(points, { x: finalLane ? left : left + radiusPx, y });
+      if (!finalLane) appendArc(points, { x: left + radiusPx, y: y + radiusPx }, radiusPx, -Math.PI / 2, -Math.PI * 1.5);
+    }
+  }
+
+  const transformed = points.map((point) => transformPoint(point, viewport, blueprint));
+  return blueprint.flipX ? transformed.reverse() : transformed;
+}
+
+function createDraftPoints(seed: string, viewport: Viewport, margin: number, blueprint: SerpentineBlueprint): DraftPoint[] {
+  if (blueprint.layout === "single-flow") return createSingleFlowDraft(seed, viewport, margin, blueprint);
+  return createHorizontalSerpentineDraft(viewport, margin, blueprint);
+}
+
+function createCandidate(
   seed: string,
   viewport: Viewport,
-  attemptIndex: number,
   courseLengthId: CourseLengthId,
   overlapDifficultyId: OverlapDifficultyId,
 ): AnalyticCandidate {
   const margin = safeMargin(viewport);
-  const endpointRng = createRng(`${seed}:${attemptIndex}:analytic-v2:endpoints`);
-  const endpoints = createBoundaryEndpointPair(endpointRng, viewport, margin);
-  const curve = tuneAmplitudeForTarget(seed, viewport, endpoints, courseLengthId, overlapDifficultyId, attemptIndex);
-  const raw = sampleRawCurve(curve);
-  const points = resampleRawByArcLength(raw, curve.sampleSpacingPx);
+  const blueprint = createBlueprint(seed, viewport, courseLengthId, overlapDifficultyId);
+  const draft = createDraftPoints(seed, viewport, margin, blueprint);
+  const raw = withDistances(draft);
+  const points = resampleRawByArcLength(raw, SAMPLE_SPACING_PX);
   const selfIntersectionCount = countSelfIntersections(points);
+  const totalLength = points[points.length - 1]?.distance ?? 0;
+  const curve: AnalyticCurveDefinition = {
+    kind: "serpentine-spline-v1",
+    seed,
+    generatorVersion: "analytic-v2",
+    courseLengthId,
+    complexityLevel: overlapDifficultyId,
+    layout: blueprint.layout,
+    start: { x: points[0].x, y: points[0].y },
+    end: { x: points[points.length - 1].x, y: points[points.length - 1].y },
+    targetLengthRangePx: blueprint.targetLengthRangePx,
+    minTurnRadiusPx: blueprint.radiusPx || Number.POSITIVE_INFINITY,
+    sampleSpacingPx: SAMPLE_SPACING_PX,
+    sourceSampleCount: raw.length,
+  };
 
   return {
     curve,
     points,
-    totalLength: points[points.length - 1]?.distance ?? 0,
+    totalLength,
     selfIntersectionCount,
     usedFallback: false,
   };
 }
 
-function isValidCandidate(candidate: AnalyticCandidate, viewport: Viewport, courseLengthId: CourseLengthId): boolean {
-  const margin = safeMargin(viewport);
-  const minDimension = Math.min(viewport.width, viewport.height);
-  const course = COURSE_LENGTHS[courseLengthId];
-  const normalizedLength = candidate.totalLength / Math.max(1, minDimension);
-
-  if (normalizedLength < course.minNormalizedLength || normalizedLength > course.maxNormalizedLength) return false;
-  if (!allInsideSafeBox(candidate.points, viewport, margin)) return false;
+function isValidCandidate(candidate: AnalyticCandidate, viewport: Viewport): boolean {
+  if (candidate.totalLength > ABSOLUTE_MAX_LENGTH_PX) return false;
+  if (!allInsideSafeBox(candidate.points, viewport, safeMargin(viewport))) return false;
   if (candidate.selfIntersectionCount !== 0) return false;
   if (maxTurnAngle(candidate.points) > MAX_TURN_ANGLE_RAD) return false;
-  if (minTurnRadius(candidate.points) < candidate.curve.minTurnRadiusPx) return false;
+  if (candidate.curve.minTurnRadiusPx !== Number.POSITIVE_INFINITY && minTurnRadius(candidate.points) < candidate.curve.minTurnRadiusPx - 1) return false;
 
   return true;
 }
 
-function candidateScore(candidate: AnalyticCandidate, viewport: Viewport, courseLengthId: CourseLengthId): number {
-  const course = COURSE_LENGTHS[courseLengthId];
-  const minDimension = Math.min(viewport.width, viewport.height);
-  const normalizedLength = candidate.totalLength / Math.max(1, minDimension);
-  const targetMiss = Math.abs(normalizedLength - course.targetNormalizedLength);
-  const lengthMiss =
-    normalizedLength < course.minNormalizedLength
-      ? course.minNormalizedLength - normalizedLength
-      : normalizedLength > course.maxNormalizedLength
-        ? normalizedLength - course.maxNormalizedLength
-        : 0;
-  const turnMiss = Math.max(0, maxTurnAngle(candidate.points) - MAX_TURN_ANGLE_RAD);
-  const radiusMiss = Math.max(0, candidate.curve.minTurnRadiusPx - minTurnRadius(candidate.points));
-  const intersectionMiss = candidate.selfIntersectionCount * 100;
-  const insideMiss = allInsideSafeBox(candidate.points, viewport, safeMargin(viewport)) ? 0 : 100;
-
-  return lengthMiss * 120 + targetMiss * 12 + turnMiss * 30 + radiusMiss * 8 + intersectionMiss + insideMiss;
-}
-
-function createFallback(
-  seed: string,
-  viewport: Viewport,
-  courseLengthId: CourseLengthId,
-  overlapDifficultyId: OverlapDifficultyId,
-): AnalyticCandidate {
-  const startIndex = Number(deriveSeed64(seed) % 17n);
-  let best: AnalyticCandidate | null = null;
-  let bestScore = Number.POSITIVE_INFINITY;
-
-  for (let offset = 0; offset < 48; offset += 1) {
-    const candidate = createAnalyticCandidate(seed, viewport, startIndex + offset, courseLengthId, overlapDifficultyId);
-    const score = candidateScore(candidate, viewport, courseLengthId);
-
-    if (score < bestScore) {
-      best = candidate;
-      bestScore = score;
-    }
-  }
-
-  return best ? { ...best, usedFallback: true } : createAnalyticCandidate(seed, viewport, startIndex, courseLengthId, overlapDifficultyId);
-}
-
 export function generatePath(input: PathGenerationInput): GeneratedPath {
-  const maxAttempts = input.maxAttempts ?? GAMEPLAY_DEFAULTS.maxPathAttempts;
   const difficulty = input.difficulty ?? "normal";
   const lineDifficulty = input.lineDifficulty ?? (difficulty === "expert" ? "hard" : difficulty);
   const visibilityLevel = input.visibilityLevel ?? lineDifficulty;
@@ -491,23 +429,9 @@ export function generatePath(input: PathGenerationInput): GeneratedPath {
   const generatorProfileId = input.generatorProfileId ?? "daily-main-normal-v1";
   const courseLengthId = input.courseLengthId ?? (input.lineType ? courseByLegacyLineType[input.lineType] : "basic");
   const overlapDifficultyId = input.overlapDifficultyId ?? overlapByLineDifficulty[lineDifficulty];
-  let candidate: AnalyticCandidate | null = null;
+  const candidate = createCandidate(input.seed, input.viewport, courseLengthId, overlapDifficultyId);
 
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const next = createAnalyticCandidate(input.seed, input.viewport, attempt, courseLengthId, overlapDifficultyId);
-    if (isValidCandidate(next, input.viewport, courseLengthId)) {
-      candidate = next;
-      break;
-    }
-
-    if (!candidate || candidateScore(next, input.viewport, courseLengthId) < candidateScore(candidate, input.viewport, courseLengthId)) {
-      candidate = next;
-    }
-  }
-
-  if (!candidate || !isValidCandidate(candidate, input.viewport, courseLengthId)) {
-    candidate = createFallback(input.seed, input.viewport, courseLengthId, overlapDifficultyId);
-  }
+  const usedFallback = candidate.usedFallback;
 
   const points = candidate.points;
   const totalLength = points[points.length - 1]?.distance ?? 0;
@@ -531,7 +455,7 @@ export function generatePath(input: PathGenerationInput): GeneratedPath {
     curve: candidate.curve,
     points,
     totalLength,
-    usedFallback: candidate.usedFallback,
+    usedFallback,
     rules: {
       pathWidthPx: rules.pathWidthPx,
       failDistancePx: rules.failDistancePx,

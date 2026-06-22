@@ -296,37 +296,6 @@ h1 {
   filter: drop-shadow(0 0 16px rgba(127, 220, 255, 0.18));
 }
 
-.daily-artifact__full-path-shadow,
-.daily-artifact__full-path {
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.daily-artifact__full-path-shadow {
-  stroke: rgba(127, 220, 255, 0.2);
-  stroke-width: 8;
-  opacity: 0.32;
-  filter: blur(4px);
-}
-
-.daily-artifact__full-path {
-  stroke: rgba(127, 214, 190, 0.9);
-  stroke-width: 4.2;
-  opacity: 0.88;
-  filter: drop-shadow(0 0 8px rgba(127, 220, 255, 0.58));
-}
-
-.daily-artifact__hint {
-  fill: none;
-  stroke: var(--primary-path);
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 4.4;
-  opacity: 0.82;
-  filter: drop-shadow(0 0 8px rgba(127, 220, 255, 0.7));
-}
-
 .daily-artifact__start {
   fill: var(--primary-path);
   filter: drop-shadow(0 0 10px rgba(127, 220, 255, 0.86));

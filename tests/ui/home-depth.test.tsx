@@ -3,12 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { createDailyContext } from "../../src/game/daily";
 import { createDailyPackContext, getDailyCourseContext } from "../../src/game/dailyPack";
-import { generatePath } from "../../src/game/pathGenerator";
-import type { CourseLengthId, GeneratedPath, OverlapDifficultyId, VisibilityLevelId } from "../../src/game/types";
-import { createPreviewViewport } from "../../src/game/viewport";
+import type { CourseLengthId, OverlapDifficultyId, VisibilityLevelId } from "../../src/game/types";
 import { createI18n } from "../../src/i18n";
 import { HomeScreen } from "../../src/ui/HomeScreen";
-import { createSmoothPathD } from "../../src/ui/components/DailyArtifact";
 
 function renderHome(overrides: Partial<{
   courseLengthId: CourseLengthId;
@@ -43,14 +40,6 @@ function renderHome(overrides: Partial<{
   );
 }
 
-function getHeroPathD(): string {
-  return document.querySelector(".daily-artifact__full-path")?.getAttribute("d") ?? "";
-}
-
-function pathD(path: GeneratedPath): string {
-  return createSmoothPathD(path.points);
-}
-
 describe("Home course/overlap/sight layout", () => {
   test("centers the selected line preview and summarizes the three play axes", () => {
     renderHome();
@@ -62,18 +51,13 @@ describe("Home course/overlap/sight layout", () => {
     expect(screen.queryByText("공식 프리셋")).not.toBeInTheDocument();
   });
 
-  test("uses an example curve in the Home preview instead of revealing today's actual line", () => {
-    const daily = createDailyContext(new Date("2026-06-21T12:00:00+09:00"));
-    const dailyPack = createDailyPackContext(daily);
-    const selectedLine = getDailyCourseContext(dailyPack, "basic", "complex", "normal");
-    const actualDailyPath = generatePath({ ...selectedLine, viewport: createPreviewViewport() });
-
+  test("hides the actual full path in the Home preview", () => {
     renderHome();
 
-    const previewD = getHeroPathD();
-    expect(previewD).not.toBe(pathD(actualDailyPath));
-    expect(previewD).toContain("Q");
-    expect(previewD).not.toContain(" L ");
+    expect(document.querySelector(".daily-artifact__full-path")).toBeNull();
+    expect(document.querySelector(".daily-artifact__full-path-shadow")).toBeNull();
+    expect(document.querySelector(".daily-artifact__start")).toBeInTheDocument();
+    expect(document.querySelector(".daily-artifact__destination")).toBeInTheDocument();
   });
 
   test("shows course length, overlap difficulty, and sight as separate centered controls", async () => {
