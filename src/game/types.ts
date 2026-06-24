@@ -14,7 +14,6 @@ export type ScoringProfileId =
   | "precision-accuracy-v1";
 export type Point = { x: number; y: number };
 export type Viewport = { width: number; height: number };
-export type PathLayout = "single-flow" | "two-lane-serpentine" | "three-lane-serpentine";
 
 export type PathPoint = Point & {
   t: number;
@@ -23,19 +22,25 @@ export type PathPoint = Point & {
   u?: number;
 };
 
+// A single continuous, self-avoiding curve grown by curvature-driven walk.
+// There is no fixed template, no required waypoint coordinate, and no lane layout.
 export type AnalyticCurveDefinition = {
-  kind: "serpentine-spline-v1";
+  kind: "self-avoiding-curvature-v4";
   seed: string;
   generatorVersion: "analytic-v2";
   courseLengthId: CourseLengthId;
-  complexityLevel: OverlapDifficultyId;
-  layout: PathLayout;
+  overlapDifficultyId: OverlapDifficultyId;
   start: Point;
   end: Point;
   targetLengthRangePx: { min: number; max: number };
   minTurnRadiusPx: number;
+  selfClearancePx: number;
+  attractorCount: number;
   sampleSpacingPx: number;
   sourceSampleCount: number;
+  attemptIndex: number;
+  usedFallback: boolean;
+  occupancy: { widthRatio: number; heightRatio: number };
 };
 
 export type GeneratedPath = {

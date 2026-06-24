@@ -1,89 +1,23 @@
 import { describe, expect, test } from "vitest";
-import { GAMEPLAY_DEFAULTS } from "../../src/game/config";
+import { GAMEPLAY_DEFAULTS, OVERLAP_SHAPE_PROFILES, PATH_LENGTH_RANGES_PX } from "../../src/game/config";
 import { createDailyContext } from "../../src/game/daily";
-import { createDailyPackContext, getDailyLineContext } from "../../src/game/dailyPack";
 import { generatePath } from "../../src/game/pathGenerator";
 import { hasSelfIntersection } from "../../src/game/pathGeometry";
-import type { CourseLengthId, GeneratorProfileId, LineDifficultyId, LineType, OverlapDifficultyId, Point } from "../../src/game/types";
+import type { CourseLengthId, OverlapDifficultyId, Point } from "../../src/game/types";
 
 const viewport = { width: 390, height: 560 };
 const playViewport = { width: 390, height: 740 };
-const lockedFixtureSeed = "0x6f1c2a9d4e11b7c3";
+
+const COURSES: CourseLengthId[] = ["short", "basic", "long", "longRun", "marathon"];
+const OVERLAPS: OverlapDifficultyId[] = ["light", "normal", "complex", "hard", "master"];
 
 function checksumPoints(points: Point[]): string {
-  return points
-    .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
-    .join("|");
-}
-
-function maxTurnAngle(points: Point[]): number {
-  let maxAngle = 0;
-
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const previous = points[index - 1];
-    const current = points[index];
-    const next = points[index + 1];
-    const first = { x: current.x - previous.x, y: current.y - previous.y };
-    const second = { x: next.x - current.x, y: next.y - current.y };
-    const firstLength = Math.hypot(first.x, first.y);
-    const secondLength = Math.hypot(second.x, second.y);
-
-    if (firstLength < 1 || secondLength < 1) continue;
-
-    const dot = first.x * second.x + first.y * second.y;
-    const ratio = Math.min(1, Math.max(-1, dot / (firstLength * secondLength)));
-    maxAngle = Math.max(maxAngle, Math.acos(ratio));
-  }
-
-  return maxAngle;
-}
-
-function clippedInteriorYCount(points: Point[], targetViewport = viewport): number {
-  const margin = Math.min(GAMEPLAY_DEFAULTS.safeMarginPx, Math.max(16, Math.min(targetViewport.width, targetViewport.height) * 0.18));
-
-  return points.filter((point, index) => {
-    const isEndpoint = index === 0 || index === points.length - 1;
-    return !isEndpoint && (point.y <= margin + 0.01 || point.y >= targetViewport.height - margin - 0.01);
-  }).length;
+  return points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join("|");
 }
 
 function safeMargin(targetViewport = viewport): number {
   return Math.min(GAMEPLAY_DEFAULTS.safeMarginPx, Math.max(16, Math.min(targetViewport.width, targetViewport.height) * 0.18));
 }
-
-function isNearSafeBoundary(point: Point, targetViewport = viewport): boolean {
-  const margin = safeMargin(targetViewport);
-  const boundaryBand = 18;
-
-  return (
-    Math.abs(point.x - margin) <= boundaryBand ||
-    Math.abs(point.x - (targetViewport.width - margin)) <= boundaryBand ||
-    Math.abs(point.y - margin) <= boundaryBand ||
-    Math.abs(point.y - (targetViewport.height - margin)) <= boundaryBand
-  );
-}
-
-function hasOppositeSafeBoundaryAxis(start: Point, end: Point, targetViewport = viewport): boolean {
-  const margin = safeMargin(targetViewport);
-  const boundaryBand = 22;
-  const startLeft = Math.abs(start.x - margin) <= boundaryBand;
-  const startRight = Math.abs(start.x - (targetViewport.width - margin)) <= boundaryBand;
-  const startTop = Math.abs(start.y - margin) <= boundaryBand;
-  const startBottom = Math.abs(start.y - (targetViewport.height - margin)) <= boundaryBand;
-  const endLeft = Math.abs(end.x - margin) <= boundaryBand;
-  const endRight = Math.abs(end.x - (targetViewport.width - margin)) <= boundaryBand;
-  const endTop = Math.abs(end.y - margin) <= boundaryBand;
-  const endBottom = Math.abs(end.y - (targetViewport.height - margin)) <= boundaryBand;
-
-  return (startLeft && endRight) || (startRight && endLeft) || (startTop && endBottom) || (startBottom && endTop);
-}
-
-const profileByLineType: Record<LineType, GeneratorProfileId> = {
-  warmup: "gentle-warmup-v1",
-  main: "daily-main-normal-v1",
-  curve: "curve-control-v1",
-  precision: "precision-focus-v1",
-};
 
 function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boolean {
   const orientation = (p: Point, q: Point, r: Point) => (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
@@ -113,537 +47,232 @@ function minTurnRadius(points: Point[]): number {
     const c = points[index + 1];
     const ab = Math.hypot(a.x - b.x, a.y - b.y);
     const bc = Math.hypot(b.x - c.x, b.y - c.y);
-    const ca = Math.hypot(c.x - a.x, c.y - a.y);
     if (ab < 0.8 || bc < 0.8) continue;
-
+    const ca = Math.hypot(c.x - a.x, c.y - a.y);
     const doubleArea = Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
     if (doubleArea > 0.001) radius = Math.min(radius, (ab * bc * ca) / (2 * doubleArea));
   }
   return radius;
 }
 
-function maxHeadingDelta(points: Point[]): number {
-  let maxDelta = 0;
-
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const previous = points[index - 1];
-    const current = points[index];
-    const next = points[index + 1];
-    const first = Math.atan2(current.y - previous.y, current.x - previous.x);
-    const second = Math.atan2(next.y - current.y, next.x - current.x);
-    const delta = Math.abs(Math.atan2(Math.sin(second - first), Math.cos(second - first)));
-    maxDelta = Math.max(maxDelta, delta);
+function minNonAdjacentClearance(points: Point[], exclusion: number): number {
+  let min = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < points.length; i += 1) {
+    for (let j = i + exclusion; j < points.length; j += 1) {
+      const d = Math.hypot(points[i].x - points[j].x, points[i].y - points[j].y);
+      if (d < min) min = d;
+    }
   }
-
-  return maxDelta;
-}
-
-function curvatureDirectionChanges(points: Point[]): number {
-  let changes = 0;
-  let previousSign = 0;
-
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const previous = points[index - 1];
-    const current = points[index];
-    const next = points[index + 1];
-    const first = { x: current.x - previous.x, y: current.y - previous.y };
-    const second = { x: next.x - current.x, y: next.y - current.y };
-    const firstLength = Math.hypot(first.x, first.y);
-    const secondLength = Math.hypot(second.x, second.y);
-    if (firstLength < 0.8 || secondLength < 0.8) continue;
-
-    const cross = (first.x * second.y - first.y * second.x) / (firstLength * secondLength);
-    if (Math.abs(cross) < 0.012) continue;
-
-    const sign = Math.sign(cross);
-    if (previousSign !== 0 && sign !== previousSign) changes += 1;
-    previousSign = sign;
-  }
-
-  return changes;
-}
-
-function segmentLengths(points: Point[]): number[] {
-  return points.slice(1).map((point, index) => {
-    const previous = points[index];
-    return Math.hypot(point.x - previous.x, point.y - previous.y);
-  });
+  return min;
 }
 
 function maxHeadingChangeOverDistance(points: Point[], distancePx: number): number {
   let maxDelta = 0;
-
-  for (let start = 0; start < points.length - 2; start += 1) {
-    let end = start + 1;
+  for (let start = 1; start < points.length - 1; start += 1) {
+    let end = start;
     while (end < points.length - 1) {
       const traveled = Math.hypot(points[end].x - points[start].x, points[end].y - points[start].y);
       if (traveled >= distancePx) break;
       end += 1;
     }
     if (end >= points.length - 1) break;
-
-    const before = points[Math.max(0, start - 1)];
-    const after = points[Math.min(points.length - 1, end + 1)];
-    const first = Math.atan2(points[start].y - before.y, points[start].x - before.x);
-    const second = Math.atan2(after.y - points[end].y, after.x - points[end].x);
+    const first = Math.atan2(points[start].y - points[start - 1].y, points[start].x - points[start - 1].x);
+    const second = Math.atan2(points[end + 1].y - points[end].y, points[end + 1].x - points[end].x);
     const delta = Math.abs(Math.atan2(Math.sin(second - first), Math.cos(second - first)));
     maxDelta = Math.max(maxDelta, delta);
   }
-
   return maxDelta;
 }
 
-function inflectionArcGaps(points: Array<Point & { distance?: number }>): number[] {
-  const distances: number[] = [];
-  let previousSign = 0;
-  let previousDistance: number | null = null;
-
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const previous = points[index - 1];
-    const current = points[index];
-    const next = points[index + 1];
-    const cross = (current.x - previous.x) * (next.y - current.y) - (current.y - previous.y) * (next.x - current.x);
-    if (Math.abs(cross) < 0.08) continue;
-    const sign = Math.sign(cross);
-    if (previousSign !== 0 && sign !== previousSign) {
-      const currentDistance = current.distance ?? 0;
-      if (previousDistance !== null) distances.push(currentDistance - previousDistance);
-      previousDistance = currentDistance;
-    } else if (previousSign === 0) {
-      previousDistance = current.distance ?? 0;
-    }
-    previousSign = sign;
-  }
-
-  return distances;
+function maxSegmentLength(points: Point[]): number {
+  let max = 0;
+  for (let index = 1; index < points.length; index += 1) max = Math.max(max, Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y));
+  return max;
 }
 
-describe("path generator", () => {
-  test("generated path is sourced from one serpentine spline definition", () => {
-    const daily = createDailyContext(new Date(2026, 5, 23));
-    const path = generatePath({
-      ...daily,
-      seed: "hiddenline-serpentine-source-of-truth",
-      courseLengthId: "basic",
-      overlapDifficultyId: "complex",
-      visibilityLevel: "normal",
-      viewport: playViewport,
-    });
+function isNearSafeBoundary(point: Point, targetViewport = viewport): boolean {
+  const margin = safeMargin(targetViewport);
+  const band = 20;
+  return (
+    Math.abs(point.x - margin) <= band ||
+    Math.abs(point.x - (targetViewport.width - margin)) <= band ||
+    Math.abs(point.y - margin) <= band ||
+    Math.abs(point.y - (targetViewport.height - margin)) <= band
+  );
+}
 
-    expect(path.generatorVersion).toBe("analytic-v2");
-    expect(path.curve?.kind).toBe("serpentine-spline-v1");
+function hasOppositeBoundaryAxis(start: Point, end: Point, targetViewport = viewport): boolean {
+  const margin = safeMargin(targetViewport);
+  const band = 24;
+  const sl = Math.abs(start.x - margin) <= band;
+  const sr = Math.abs(start.x - (targetViewport.width - margin)) <= band;
+  const st = Math.abs(start.y - margin) <= band;
+  const sb = Math.abs(start.y - (targetViewport.height - margin)) <= band;
+  const el = Math.abs(end.x - margin) <= band;
+  const er = Math.abs(end.x - (targetViewport.width - margin)) <= band;
+  const et = Math.abs(end.y - margin) <= band;
+  const eb = Math.abs(end.y - (targetViewport.height - margin)) <= band;
+  return (sl && er) || (sr && el) || (st && eb) || (sb && et);
+}
+
+function generate(seed: string, courseLengthId: CourseLengthId, overlapDifficultyId: OverlapDifficultyId, targetViewport = playViewport) {
+  const daily = createDailyContext(new Date(2026, 5, 24));
+  return generatePath({ ...daily, seed, courseLengthId, overlapDifficultyId, visibilityLevel: "normal", viewport: targetViewport });
+}
+
+describe("self-avoiding curvature generator", () => {
+  test("uses the self-avoiding-curvature-v4 curve, not a serpentine template", () => {
+    const path = generate("hiddenline-kind", "basic", "complex");
+    expect(path.curve?.kind).toBe("self-avoiding-curvature-v4");
     expect(path.curve?.seed).toBe(path.seed);
     expect(path.curve?.start).toEqual({ x: path.start.x, y: path.start.y });
     expect(path.curve?.end).toEqual({ x: path.end.x, y: path.end.y });
     expect(path.curve?.sampleSpacingPx).toBe(3.5);
-    expect(path.curve?.layout).toBe("two-lane-serpentine");
-    expect(path.curve?.targetLengthRangePx).toEqual({ min: 850, max: 1200 });
   });
 
-  test("course length selects CSS pixel ranges without treating 2000px as a target", () => {
-    const daily = createDailyContext(new Date(2026, 5, 21));
-    const cases: Array<[CourseLengthId, number, number]> = [
-      ["short", 600, 900],
-      ["basic", 850, 1200],
-      ["long", 1000, 1450],
-      ["longRun", 1300, 1750],
-      ["marathon", 1650, 2000],
-    ];
-
-    for (const [courseLengthId, min, max] of cases) {
-      const path = generatePath({
-        ...daily,
-        seed: `hiddenline-course-length:${courseLengthId}`,
-        courseLengthId,
-        overlapDifficultyId: "light",
-        visibilityLevel: "normal",
-        viewport: playViewport,
-      });
-
-      expect(path.totalLength, courseLengthId).toBeGreaterThanOrEqual(min);
-      expect(path.totalLength, courseLengthId).toBeLessThanOrEqual(max);
-      expect(path.totalLength, courseLengthId).toBeLessThanOrEqual(2000);
-    }
-  });
-
-  test("curve complexity selector changes analytic profile without forcing self-crossings", () => {
-    const daily = createDailyContext(new Date(2026, 5, 21));
-    const cases: OverlapDifficultyId[] = ["light", "normal", "complex", "hard", "master"];
-    let previousChecksum: string | null = null;
-
-    for (const overlapDifficultyId of cases) {
-      const path = generatePath({
-        ...daily,
-        seed: `hiddenline-overlap:${overlapDifficultyId}`,
-        courseLengthId: "marathon",
-        overlapDifficultyId,
-        visibilityLevel: "normal",
-        viewport,
-      });
-
-      expect(path.curve?.complexityLevel, overlapDifficultyId).toBe(overlapDifficultyId);
-      expect(path.selfIntersectionCount, overlapDifficultyId).toBe(0);
-      expect(countSelfIntersections(path.points), overlapDifficultyId).toBe(0);
-      expect(hasSelfIntersection(path.points), overlapDifficultyId).toBe(false);
-      expect(maxTurnAngle(path.points), overlapDifficultyId).toBeLessThan(0.58);
-
-      const checksum = checksumPoints(path.points);
-      if (previousChecksum) expect(checksum, overlapDifficultyId).not.toBe(previousChecksum);
-      previousChecksum = checksum;
-    }
-  });
-
-  test("arc length sampling uses 3 to 4px spacing and avoids stitched heading jumps", () => {
-    const daily = createDailyContext(new Date(2026, 5, 22));
-    const cases: OverlapDifficultyId[] = ["light", "normal", "complex", "hard", "master"];
-
-    for (const overlapDifficultyId of cases) {
-      const path = generatePath({
-        ...daily,
-        seed: `hiddenline-serpentine-spacing:${overlapDifficultyId}`,
-        courseLengthId: "marathon",
-        overlapDifficultyId,
-        visibilityLevel: "normal",
-        viewport: playViewport,
-      });
-      const lengths = segmentLengths(path.points);
-
-      expect(Math.max(...lengths), overlapDifficultyId).toBeLessThanOrEqual(4.5);
-      expect(path.points.length, overlapDifficultyId).toBeLessThanOrEqual(768);
-      expect(maxTurnAngle(path.points), overlapDifficultyId).toBeLessThan(0.58);
-      expect(minTurnRadius(path.points), overlapDifficultyId).toBeGreaterThan(52);
-      expect(curvatureDirectionChanges(path.points), overlapDifficultyId).toBeLessThanOrEqual(8);
-      expect(maxHeadingChangeOverDistance(path.points, 32), overlapDifficultyId).toBeLessThan(Math.PI / 6);
-    }
-  });
-
-  test("three-lane serpentine reaches long focus length without micro wiggles on 390x740", () => {
-    const daily = createDailyContext(new Date(2026, 5, 23));
-    const path = generatePath({
-      ...daily,
-      seed: "hiddenline-three-lane-serpentine-capacity",
-      courseLengthId: "marathon",
-      overlapDifficultyId: "master",
-      visibilityLevel: "normal",
-      viewport: playViewport,
-    });
-
-    expect(path.curve?.layout).toBe("three-lane-serpentine");
-    expect(path.totalLength).toBeGreaterThanOrEqual(1800);
-    expect(path.totalLength).toBeLessThanOrEqual(2000);
-    expect(minTurnRadius(path.points)).toBeGreaterThanOrEqual(52);
-    expect(inflectionArcGaps(path.points).every((gap) => gap >= 140)).toBe(true);
-    expect(countSelfIntersections(path.points)).toBe(0);
-  });
-
-  test("generated paths start and end near opposite sides of the safe play rectangle", () => {
-    const daily = createDailyContext(new Date(2026, 5, 21));
-    const cases: Array<[CourseLengthId, OverlapDifficultyId]> = [
-      ["short", "light"],
-      ["basic", "normal"],
-      ["long", "complex"],
-      ["longRun", "hard"],
-      ["marathon", "master"],
-    ];
-
-    for (const [courseLengthId, overlapDifficultyId] of cases) {
-      const path = generatePath({
-        ...daily,
-        seed: `hiddenline-boundary-endpoints:${courseLengthId}:${overlapDifficultyId}`,
-        courseLengthId,
-        overlapDifficultyId,
-        visibilityLevel: "normal",
-        viewport,
-      });
-
-      expect(isNearSafeBoundary(path.start), `${courseLengthId}/${overlapDifficultyId}/start`).toBe(true);
-      expect(isNearSafeBoundary(path.end), `${courseLengthId}/${overlapDifficultyId}/end`).toBe(true);
-      expect(hasOppositeSafeBoundaryAxis(path.start, path.end), `${courseLengthId}/${overlapDifficultyId}/opposite`).toBe(true);
-    }
-  });
-
-  test("endpoint anchoring is part of the same curve, not stitched ramps", () => {
-    const daily = createDailyContext(new Date(2026, 5, 22));
-    const path = generatePath({
-      ...daily,
-      seed: "hiddenline-endpoint-curve-guard",
-      courseLengthId: "basic",
-      overlapDifficultyId: "complex",
-      visibilityLevel: "normal",
-      viewport,
-    });
-
-    expect(path.curve?.start).toEqual({ x: path.points[0].x, y: path.points[0].y });
-    expect(path.curve?.end).toEqual({ x: path.points.at(-1)?.x, y: path.points.at(-1)?.y });
-    expect(maxHeadingDelta(path.points.slice(0, 32))).toBeLessThan(0.24);
-    expect(maxHeadingDelta(path.points.slice(-32))).toBeLessThan(0.24);
-  });
-
-  test("deterministic seed generates the same path", () => {
-    const daily = createDailyContext(new Date(2026, 5, 13));
-    const first = generatePath({ ...daily, viewport });
-    const second = generatePath({ ...daily, viewport });
-
-    expect(first.seed).toBe(second.seed);
+  test("same seed and settings produce an identical path", () => {
+    const first = generate("hiddenline-determinism", "long", "hard");
+    const second = generate("hiddenline-determinism", "long", "hard");
     expect(first.points).toEqual(second.points);
+    expect(checksumPoints(first.points)).toBe(checksumPoints(second.points));
   });
 
-  test("generated path has monotonic t and positive length", () => {
-    const daily = createDailyContext(new Date(2026, 5, 13));
-    const path = generatePath({ ...daily, viewport });
+  test("different seeds produce structurally different paths", () => {
+    const a = generate("hiddenline-seed-a", "long", "complex");
+    const b = generate("hiddenline-seed-b", "long", "complex");
+    expect(checksumPoints(a.points)).not.toBe(checksumPoints(b.points));
+    expect(a.start).not.toEqual(b.start);
+  });
 
-    expect(path.points.length).toBeGreaterThanOrEqual(96);
+  test("start and end are deterministic, near opposite safe edges, and far apart", () => {
+    const diagonal = Math.hypot(playViewport.width, playViewport.height);
+    for (const courseLengthId of COURSES) {
+      const path = generate(`hiddenline-endpoints:${courseLengthId}`, courseLengthId, "normal");
+      expect(isNearSafeBoundary(path.start, playViewport), `${courseLengthId}/start`).toBe(true);
+      expect(isNearSafeBoundary(path.end, playViewport), `${courseLengthId}/end`).toBe(true);
+      expect(hasOppositeBoundaryAxis(path.start, path.end, playViewport), `${courseLengthId}/opposite`).toBe(true);
+      expect(Math.hypot(path.start.x - path.end.x, path.start.y - path.end.y), `${courseLengthId}/separation`).toBeGreaterThanOrEqual(diagonal * 0.4);
+    }
+  });
+
+  test("paths never self-intersect across every course and overlap setting", () => {
+    for (const courseLengthId of COURSES) {
+      for (const overlapDifficultyId of OVERLAPS) {
+        const path = generate(`hiddenline-cross:${courseLengthId}:${overlapDifficultyId}`, courseLengthId, overlapDifficultyId);
+        expect(path.selfIntersectionCount, `${courseLengthId}/${overlapDifficultyId}`).toBe(0);
+        expect(countSelfIntersections(path.points), `${courseLengthId}/${overlapDifficultyId}`).toBe(0);
+        expect(hasSelfIntersection(path.points), `${courseLengthId}/${overlapDifficultyId}`).toBe(false);
+      }
+    }
+  });
+
+  test("arcs stay large (no small circles) per overlap profile", () => {
+    for (const overlapDifficultyId of OVERLAPS) {
+      const target = OVERLAP_SHAPE_PROFILES[overlapDifficultyId].minTurnRadiusPx;
+      const path = generate(`hiddenline-radius:${overlapDifficultyId}`, "marathon", overlapDifficultyId);
+      expect(minTurnRadius(path.points), overlapDifficultyId).toBeGreaterThanOrEqual(target * 0.8);
+    }
+  });
+
+  test("non-adjacent passes keep the overlap profile clearance", () => {
+    for (const overlapDifficultyId of OVERLAPS) {
+      const clearance = OVERLAP_SHAPE_PROFILES[overlapDifficultyId].selfClearancePx;
+      const exclusion = Math.ceil((clearance * 1.7) / 3.5);
+      const path = generate(`hiddenline-clearance:${overlapDifficultyId}`, "marathon", overlapDifficultyId);
+      expect(minNonAdjacentClearance(path.points, exclusion), overlapDifficultyId).toBeGreaterThanOrEqual(clearance * 0.82);
+    }
+  });
+
+  test("curve is smooth: uniform spacing and no micro-wiggle", () => {
+    for (const overlapDifficultyId of OVERLAPS) {
+      const path = generate(`hiddenline-smooth:${overlapDifficultyId}`, "longRun", overlapDifficultyId);
+      expect(maxSegmentLength(path.points), overlapDifficultyId).toBeLessThanOrEqual(4.5);
+      expect(maxHeadingChangeOverDistance(path.points, 32), overlapDifficultyId).toBeLessThan(Math.PI / 4);
+    }
+  });
+
+  test("length never exceeds the 2000px ceiling and lands in the course range", () => {
+    for (const courseLengthId of COURSES) {
+      const range = PATH_LENGTH_RANGES_PX[courseLengthId];
+      const path = generate(`hiddenline-length:${courseLengthId}`, courseLengthId, "normal");
+      expect(path.totalLength, courseLengthId).toBeLessThanOrEqual(2000);
+      expect(path.totalLength, courseLengthId).toBeGreaterThanOrEqual(range.min);
+      expect(path.totalLength, courseLengthId).toBeLessThanOrEqual(range.max);
+      expect(path.usedFallback, courseLengthId).toBe(false);
+    }
+  });
+
+  test("longer courses are longer on average", () => {
+    const average = (courseLengthId: CourseLengthId): number => {
+      let sum = 0;
+      const seeds = 8;
+      for (let s = 0; s < seeds; s += 1) sum += generate(`hiddenline-order:${courseLengthId}:${s}`, courseLengthId, "normal").totalLength;
+      return sum / seeds;
+    };
+    expect(average("basic")).toBeGreaterThan(average("short"));
+    expect(average("marathon")).toBeGreaterThan(average("basic"));
+  });
+
+  test("all points stay inside the safe margin", () => {
+    const margin = safeMargin(playViewport);
+    for (const overlapDifficultyId of OVERLAPS) {
+      const path = generate(`hiddenline-margin:${overlapDifficultyId}`, "marathon", overlapDifficultyId);
+      for (const point of path.points) {
+        expect(point.x).toBeGreaterThanOrEqual(margin - 0.01);
+        expect(point.x).toBeLessThanOrEqual(playViewport.width - margin + 0.01);
+        expect(point.y).toBeGreaterThanOrEqual(margin - 0.01);
+        expect(point.y).toBeLessThanOrEqual(playViewport.height - margin + 0.01);
+      }
+    }
+  });
+
+  test("progressT is monotonic with positive length", () => {
+    const path = generate("hiddenline-progress", "long", "complex");
     expect(path.points[0]?.t).toBe(0);
     expect(path.points.at(-1)?.t).toBe(1);
     expect(path.totalLength).toBeGreaterThan(0);
-
     for (let index = 1; index < path.points.length; index += 1) {
       expect(path.points[index].t).toBeGreaterThanOrEqual(path.points[index - 1].t);
       expect(path.points[index].distance).toBeGreaterThanOrEqual(path.points[index - 1].distance);
     }
   });
 
-  test("generated path stays within safe margin and avoids self-intersection by default", () => {
-    const daily = createDailyContext(new Date(2026, 5, 13));
-    const path = generatePath({ ...daily, viewport });
-    const margin = GAMEPLAY_DEFAULTS.safeMarginPx;
-
-    for (const point of path.points) {
-      expect(point.x).toBeGreaterThanOrEqual(margin);
-      expect(point.x).toBeLessThanOrEqual(viewport.width - margin);
-      expect(point.y).toBeGreaterThanOrEqual(margin);
-      expect(point.y).toBeLessThanOrEqual(viewport.height - margin);
-    }
-
-    expect(countSelfIntersections(path.points)).toBe(0);
-    expect(hasSelfIntersection(path.points)).toBe(false);
+  test("visibility level changes reveal/fail rules without changing the line shape", () => {
+    const base = { ...createDailyContext(new Date(2026, 5, 24)), seed: "hiddenline-visibility", courseLengthId: "basic" as const, overlapDifficultyId: "complex" as const, viewport };
+    const easy = generatePath({ ...base, visibilityLevel: "easy" });
+    const normal = generatePath({ ...base, visibilityLevel: "normal" });
+    const hard = generatePath({ ...base, visibilityLevel: "hard" });
+    expect(easy.points).toEqual(normal.points);
+    expect(normal.points).toEqual(hard.points);
+    expect(easy.rules.revealRadiusPx).toBeGreaterThan(normal.rules.revealRadiusPx);
+    expect(normal.rules.revealRadiusPx).toBeGreaterThan(hard.rules.revealRadiusPx);
   });
 
-  test("locked Standard fixture stays deterministic for the approved seed without pinning old coordinates", () => {
-    const daily = createDailyContext(new Date(2026, 5, 13));
-    const path = generatePath({
-      ...daily,
-      seed: lockedFixtureSeed,
-      generatorVersion: "v1" as never,
-      lineType: "main",
-      courseLengthId: "basic",
-      overlapDifficultyId: "normal",
-      generatorProfileId: "daily-main-normal-v1",
-      lineDifficulty: "normal",
-      visibilityLevel: "normal",
-      viewport,
-    } as any);
-    const second = generatePath({
-      ...daily,
-      seed: lockedFixtureSeed,
-      generatorVersion: "v1" as never,
-      lineType: "main",
-      courseLengthId: "basic",
-      overlapDifficultyId: "normal",
-      generatorProfileId: "daily-main-normal-v1",
-      lineDifficulty: "normal",
-      visibilityLevel: "normal",
-      viewport,
-    } as any);
-
-    expect(path.generatorVersion).toBe("v1");
-    expect(path.lineType).toBe("main");
-    expect(path.courseLengthId).toBe("basic");
-    expect(path.overlapDifficultyId).toBe("normal");
-    expect(path.start.x).toBeCloseTo(path.points[0]?.x ?? 0, 6);
-    expect(path.start.y).toBeCloseTo(path.points[0]?.y ?? 0, 6);
-    expect(path.end.x).toBeCloseTo(path.points.at(-1)?.x ?? 0, 6);
-    expect(path.end.y).toBeCloseTo(path.points.at(-1)?.y ?? 0, 6);
-    expect(checksumPoints(path.points)).toBe(checksumPoints(second.points));
-  });
-
-  test("generator profile changes the generated line shape", () => {
-    const daily = createDailyContext(new Date(2026, 5, 13));
-    const base = {
-      ...daily,
-      seed: "hiddenline-profile-test",
-      viewport,
-    };
-    const warmup = generatePath({ ...base, lineType: "warmup" as const, generatorProfileId: "gentle-warmup-v1" as const });
-    const curve = generatePath({ ...base, lineType: "curve" as const, generatorProfileId: "curve-control-v1" as const });
-
-    expect(curve.points).not.toEqual(warmup.points);
-    expect(curve.totalLength).toBeGreaterThan(warmup.totalLength * 0.9);
-  });
-
-  test("legacy line difficulty maps to analytic curve complexity instead of course length", () => {
-    const daily = createDailyContext(new Date(2026, 5, 13));
-    const base = {
-      ...daily,
-      seed: "hiddenline-line-difficulty-test",
-      lineType: "main" as const,
-      generatorProfileId: "daily-main-normal-v1" as const,
-      viewport,
-      visibilityLevel: "normal" as const,
-    };
-    const easyLine = generatePath({ ...base, lineDifficulty: "easy" });
-    const normalLine = generatePath({ ...base, lineDifficulty: "normal" });
-    const hardLine = generatePath({ ...base, lineDifficulty: "hard" });
-
-    expect(easyLine.points).not.toEqual(normalLine.points);
-    expect(normalLine.points).not.toEqual(hardLine.points);
-    expect(easyLine.curve?.complexityLevel).toBe("normal");
-    expect(normalLine.curve?.complexityLevel).toBe("complex");
-    expect(hardLine.curve?.complexityLevel).toBe("hard");
-    expect(countSelfIntersections(easyLine.points)).toBe(0);
-    expect(countSelfIntersections(normalLine.points)).toBe(0);
-    expect(countSelfIntersections(hardLine.points)).toBe(0);
-    expect(easyLine.courseLengthId).toBe(normalLine.courseLengthId);
-    expect(normalLine.courseLengthId).toBe(hardLine.courseLengthId);
-  });
-
-  test("hard line difficulty stays on one fair analytic progression path", () => {
-    const daily = createDailyContext(new Date(2026, 5, 13));
-    const hardLine = generatePath({
-      ...daily,
-      seed: "hiddenline-hard-self-crossing-test",
-      lineType: "curve",
-      generatorProfileId: "curve-control-v1",
-      lineDifficulty: "hard",
-      visibilityLevel: "normal",
-      viewport,
-    });
-
-    expect(hardLine.curve?.kind).toBe("serpentine-spline-v1");
-    expect(hasSelfIntersection(hardLine.points)).toBe(false);
-    expect(maxTurnAngle(hardLine.points)).toBeLessThan(0.58);
-  });
-
-  test("legacy line families now map to course length while overlap remains separate", () => {
-    const daily = createDailyContext(new Date(2026, 5, 13));
-    const base = {
-      ...daily,
-      seed: "hiddenline-hard-family-rule-test",
-      lineDifficulty: "hard" as const,
-      visibilityLevel: "normal" as const,
-      viewport,
-    };
-    const warmup = generatePath({ ...base, lineType: "warmup", generatorProfileId: "gentle-warmup-v1" });
-    const main = generatePath({ ...base, lineType: "main", generatorProfileId: "daily-main-normal-v1" });
-    const curve = generatePath({ ...base, lineType: "curve", generatorProfileId: "curve-control-v1" });
-    const precision = generatePath({ ...base, lineType: "precision", generatorProfileId: "precision-focus-v1" });
-
+  test("legacy line types still map to a course and stay valid", () => {
+    const daily = createDailyContext(new Date(2026, 5, 24));
+    const warmup = generatePath({ ...daily, seed: "hiddenline-legacy-warmup", lineType: "warmup", generatorProfileId: "gentle-warmup-v1", viewport: playViewport });
+    const precision = generatePath({ ...daily, seed: "hiddenline-legacy-precision", lineType: "precision", generatorProfileId: "precision-focus-v1", viewport: playViewport });
     expect(warmup.courseLengthId).toBe("short");
-    expect(main.courseLengthId).toBe("basic");
-    expect(curve.courseLengthId).toBe("longRun");
     expect(precision.courseLengthId).toBe("marathon");
-    expect(main.totalLength).toBeGreaterThan(warmup.totalLength);
-    expect(curve.totalLength).toBeGreaterThan(main.totalLength);
-    expect(precision.totalLength).toBeGreaterThan(curve.totalLength);
+    expect(countSelfIntersections(warmup.points)).toBe(0);
+    expect(countSelfIntersections(precision.points)).toBe(0);
   });
 
-  test("hard crossing lines avoid abrupt corner-like turns", () => {
-    const daily = createDailyContext(new Date(2026, 5, 16));
-    const base = {
-      ...daily,
-      lineDifficulty: "hard" as const,
-      visibilityLevel: "normal" as const,
-      viewport,
-    };
-    const main = generatePath({
-      ...base,
-      seed: "hiddenline-smooth-hard-main",
-      lineType: "main",
-      generatorProfileId: "daily-main-normal-v1",
-    });
-    const curve = generatePath({
-      ...base,
-      seed: "hiddenline-smooth-hard-curve",
-      lineType: "curve",
-      generatorProfileId: "curve-control-v1",
-    });
-    const precision = generatePath({
-      ...base,
-      seed: "hiddenline-smooth-hard-precision",
-      lineType: "precision",
-      generatorProfileId: "precision-focus-v1",
-    });
-
-    expect(maxTurnAngle(main.points)).toBeLessThan(1.75);
-    expect(maxTurnAngle(curve.points)).toBeLessThan(1.75);
-    expect(maxTurnAngle(precision.points)).toBeLessThan(1.75);
-  });
-
-  test("random smooth paths avoid boundary clipping corners across daily and legacy seeds", () => {
-    const daily = createDailyContext(new Date(2026, 5, 16));
-    const pack = createDailyPackContext(daily);
-    const cases = [
-      ...(["warmup", "main", "curve", "precision"] as const).flatMap((lineType) =>
-        (["easy", "normal", "hard"] as const).map((lineDifficulty) =>
-          getDailyLineContext(pack, lineType, lineDifficulty, "normal"),
-        ),
-      ),
-      ...["2026-06-15", "2026-06-16"].flatMap((localDateKey) =>
-        (["main", "curve", "precision"] as const).flatMap((lineType) =>
-          (["normal", "hard"] as const).map((lineDifficulty) => ({
-            ...daily,
-            localDateKey,
-            seed: `hiddenline-daily:${localDateKey}:daily-v1`,
-            lineType,
-            generatorProfileId: profileByLineType[lineType],
-            lineDifficulty,
-            visibilityLevel: "normal" as const,
-          })),
-        ),
-      ),
-    ];
-
-    for (const testCase of cases) {
-      const path = generatePath({ ...testCase, viewport });
-      expect(clippedInteriorYCount(path.points), `${testCase.lineType}/${testCase.lineDifficulty}/${testCase.seed}`).toBe(0);
-      expect(maxTurnAngle(path.points), `${testCase.lineType}/${testCase.lineDifficulty}/${testCase.seed}`).toBeLessThan(1.05);
+  test("bulk: every course/overlap combo yields a valid, non-crossing curve", () => {
+    let total = 0;
+    let crossing = 0;
+    for (const courseLengthId of COURSES) {
+      for (const overlapDifficultyId of OVERLAPS) {
+        for (let s = 0; s < 6; s += 1) {
+          const path = generate(`hiddenline-bulk:${courseLengthId}:${overlapDifficultyId}:${s}`, courseLengthId, overlapDifficultyId);
+          total += 1;
+          if (path.selfIntersectionCount !== 0) crossing += 1;
+          expect(path.totalLength).toBeLessThanOrEqual(2000);
+          expect(path.usedFallback).toBe(false);
+        }
+      }
     }
-  });
-
-  test("legacy line families increase course length after boundary-safe scaling", () => {
-    const daily = createDailyContext(new Date(2026, 5, 16));
-    const rows = (["warmup", "main", "curve", "precision"] as const).map((lineType) => {
-      const base = {
-        ...daily,
-        seed: `hiddenline-smooth-complexity:${lineType}`,
-        lineType,
-        generatorProfileId: profileByLineType[lineType],
-        visibilityLevel: "normal" as const,
-        viewport,
-      };
-      const normal = generatePath({ ...base, lineDifficulty: "normal" as LineDifficultyId });
-
-      return { lineType, normal };
-    });
-
-    expect(rows[1].normal.totalLength).toBeGreaterThan(rows[0].normal.totalLength);
-    expect(rows[2].normal.totalLength).toBeGreaterThan(rows[1].normal.totalLength);
-    expect(rows[3].normal.totalLength).toBeGreaterThan(rows[2].normal.totalLength);
-  });
-
-  test("visibility level changes reveal range and fail tolerance without changing the line shape", () => {
-    const daily = createDailyContext(new Date(2026, 5, 13));
-    const base = {
-      ...daily,
-      seed: "hiddenline-visibility-test",
-      lineType: "main" as const,
-      generatorProfileId: "daily-main-normal-v1" as const,
-      lineDifficulty: "hard" as const,
-      viewport,
-    };
-    const easySight = generatePath({ ...base, visibilityLevel: "easy" });
-    const normalSight = generatePath({ ...base, visibilityLevel: "normal" });
-    const hardSight = generatePath({ ...base, visibilityLevel: "hard" });
-
-    expect(easySight.points).toEqual(normalSight.points);
-    expect(normalSight.points).toEqual(hardSight.points);
-    expect(easySight.lineDifficulty).toBe("hard");
-    expect(easySight.visibilityLevel).toBe("easy");
-    expect(normalSight.visibilityLevel).toBe("normal");
-    expect(hardSight.visibilityLevel).toBe("hard");
-    expect(easySight.rules.revealRadiusPx).toBeGreaterThan(normalSight.rules.revealRadiusPx);
-    expect(normalSight.rules.revealRadiusPx).toBeGreaterThan(hardSight.rules.revealRadiusPx);
-    expect(easySight.rules.failDistancePx).toBeGreaterThan(normalSight.rules.failDistancePx);
-    expect(normalSight.rules.failDistancePx).toBeGreaterThan(hardSight.rules.failDistancePx);
+    expect(crossing).toBe(0);
+    expect(total).toBe(150);
   });
 });

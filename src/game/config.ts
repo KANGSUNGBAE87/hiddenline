@@ -1,4 +1,4 @@
-import type { CourseLengthId, DifficultyId, GeneratorVersion, LineDifficultyId, OverlapDifficultyId, VisibilityLevelId } from "./types";
+import type { CourseLengthId, DifficultyId, GeneratorVersion, OverlapDifficultyId, VisibilityLevelId } from "./types";
 
 export const GAMEPLAY_DEFAULTS = {
   generatorVersion: "analytic-v2" as GeneratorVersion,
@@ -26,125 +26,35 @@ export const GAMEPLAY_DEFAULTS = {
   scoreMax: 1000,
 };
 
-export const LINE_DIFFICULTIES: Record<
-  LineDifficultyId,
-  {
-    labelWeight: number;
-    amplitudeMultiplier: number;
-    secondaryMultiplier: number;
-    tertiaryMultiplier: number;
-    quaternaryMultiplier: number;
-    sampleCount: number;
-    targetComplexity: number;
-    minComplexity: number;
-  }
-> = {
-  easy: {
-    labelWeight: 1,
-    amplitudeMultiplier: 0.72,
-    secondaryMultiplier: 0.58,
-    tertiaryMultiplier: 0.35,
-    quaternaryMultiplier: 0,
-    sampleCount: 112,
-    targetComplexity: 0.34,
-    minComplexity: 0.2,
-  },
-  normal: {
-    labelWeight: 2,
-    amplitudeMultiplier: 1,
-    secondaryMultiplier: 1,
-    tertiaryMultiplier: 1,
-    quaternaryMultiplier: 0.28,
-    sampleCount: 128,
-    targetComplexity: 0.52,
-    minComplexity: 0.36,
-  },
-  hard: {
-    labelWeight: 3,
-    amplitudeMultiplier: 1.34,
-    secondaryMultiplier: 1.42,
-    tertiaryMultiplier: 1.82,
-    quaternaryMultiplier: 0.68,
-    sampleCount: 152,
-    targetComplexity: 0.76,
-    minComplexity: 0.58,
-  },
+// Course length nudges the arc-length target of the curve (CSS px). Keeping the
+// arcs large and non-crossing in a phone-narrow play box caps the clean length at
+// roughly 800px, so these ranges are deliberately modest and overlapping: the
+// course mainly shifts the target within the achievable band, not the hard max.
+// 2000px remains the absolute generator ceiling.
+export const PATH_LENGTH_RANGES_PX: Record<CourseLengthId, { min: number; max: number }> = {
+  short: { min: 480, max: 780 },
+  basic: { min: 520, max: 840 },
+  long: { min: 560, max: 900 },
+  longRun: { min: 600, max: 960 },
+  marathon: { min: 640, max: 1000 },
 };
 
-export const COURSE_LENGTHS: Record<
-  CourseLengthId,
-  {
-    targetNormalizedLength: number;
-    minNormalizedLength: number;
-    maxNormalizedLength: number;
-    sampleCount: number;
-  }
-> = {
-  short: {
-    targetNormalizedLength: 1.54,
-    minNormalizedLength: 1.42,
-    maxNormalizedLength: 1.74,
-    sampleCount: 360,
-  },
-  basic: {
-    targetNormalizedLength: 2.05,
-    minNormalizedLength: 1.86,
-    maxNormalizedLength: 2.25,
-    sampleCount: 480,
-  },
-  long: {
-    targetNormalizedLength: 2.85,
-    minNormalizedLength: 2.55,
-    maxNormalizedLength: 3.15,
-    sampleCount: 560,
-  },
-  longRun: {
-    targetNormalizedLength: 3.9,
-    minNormalizedLength: 3.45,
-    maxNormalizedLength: 4.35,
-    sampleCount: 720,
-  },
-  marathon: {
-    targetNormalizedLength: 5.12,
-    minNormalizedLength: 4.65,
-    maxNormalizedLength: 5.65,
-    sampleCount: 960,
-  },
-};
-
-export const OVERLAP_DIFFICULTIES: Record<
+// Overlap difficulty controls curve "tightness": larger minTurnRadius keeps the
+// circles big ("원이 작지 않게"); smaller clearance lets the curve pass closer to
+// itself without crossing. attractorCount drives how much the curve roams.
+export const OVERLAP_SHAPE_PROFILES: Record<
   OverlapDifficultyId,
   {
-    minSelfIntersections: number;
-    maxSelfIntersections: number;
     minTurnRadiusPx: number;
+    selfClearancePx: number;
+    attractorCount: { min: number; max: number };
   }
 > = {
-  light: {
-    minSelfIntersections: 0,
-    maxSelfIntersections: 0,
-    minTurnRadiusPx: 5.5,
-  },
-  normal: {
-    minSelfIntersections: 0,
-    maxSelfIntersections: 0,
-    minTurnRadiusPx: 4.5,
-  },
-  complex: {
-    minSelfIntersections: 0,
-    maxSelfIntersections: 0,
-    minTurnRadiusPx: 3.5,
-  },
-  hard: {
-    minSelfIntersections: 0,
-    maxSelfIntersections: 0,
-    minTurnRadiusPx: 2.5,
-  },
-  master: {
-    minSelfIntersections: 0,
-    maxSelfIntersections: 0,
-    minTurnRadiusPx: 2,
-  },
+  light: { minTurnRadiusPx: 105, selfClearancePx: 64, attractorCount: { min: 2, max: 3 } },
+  normal: { minTurnRadiusPx: 90, selfClearancePx: 58, attractorCount: { min: 2, max: 4 } },
+  complex: { minTurnRadiusPx: 76, selfClearancePx: 50, attractorCount: { min: 3, max: 5 } },
+  hard: { minTurnRadiusPx: 64, selfClearancePx: 44, attractorCount: { min: 4, max: 6 } },
+  master: { minTurnRadiusPx: 56, selfClearancePx: 40, attractorCount: { min: 5, max: 7 } },
 };
 
 export const VISIBILITY_LEVELS: Record<
