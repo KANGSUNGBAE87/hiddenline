@@ -1,8 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { GAMEPLAY_DEFAULTS, OVERLAP_SHAPE_PROFILES, PATH_LENGTH_RANGES_PX } from "../../src/game/config";
+import { GAMEPLAY_DEFAULTS, ORGANIC_CURVE_PROFILES } from "../../src/game/config";
 import { createDailyContext } from "../../src/game/daily";
 import { generatePath } from "../../src/game/pathGenerator";
-import { hasSelfIntersection } from "../../src/game/pathGeometry";
 import type { CourseLengthId, OverlapDifficultyId, Point } from "../../src/game/types";
 
 const viewport = { width: 390, height: 560 };
@@ -55,30 +54,12 @@ function minTurnRadius(points: Point[]): number {
   return radius;
 }
 
-function minNonAdjacentClearance(points: Point[], exclusion: number): number {
-  let min = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < points.length; i += 1) {
-    for (let j = i + exclusion; j < points.length; j += 1) {
-      const d = Math.hypot(points[i].x - points[j].x, points[i].y - points[j].y);
-      if (d < min) min = d;
-    }
-  }
-  return min;
-}
-
-function maxHeadingChangeOverDistance(points: Point[], distancePx: number): number {
+function maxInstantHeadingDelta(points: Point[]): number {
   let maxDelta = 0;
-  for (let start = 1; start < points.length - 1; start += 1) {
-    let end = start;
-    while (end < points.length - 1) {
-      const traveled = Math.hypot(points[end].x - points[start].x, points[end].y - points[start].y);
-      if (traveled >= distancePx) break;
-      end += 1;
-    }
-    if (end >= points.length - 1) break;
-    const first = Math.atan2(points[start].y - points[start - 1].y, points[start].x - points[start - 1].x);
-    const second = Math.atan2(points[end + 1].y - points[end].y, points[end + 1].x - points[end].x);
-    const delta = Math.abs(Math.atan2(Math.sin(second - first), Math.cos(second - first)));
+  for (let index = 2; index < points.length; index += 1) {
+    const previous = Math.atan2(points[index - 1].y - points[index - 2].y, points[index - 1].x - points[index - 2].x);
+    const next = Math.atan2(points[index].y - points[index - 1].y, points[index].x - points[index - 1].x);
+    const delta = Math.abs(Math.atan2(Math.sin(next - previous), Math.cos(next - previous)));
     maxDelta = Math.max(maxDelta, delta);
   }
   return maxDelta;
@@ -92,7 +73,7 @@ function maxSegmentLength(points: Point[]): number {
 
 function isNearSafeBoundary(point: Point, targetViewport = viewport): boolean {
   const margin = safeMargin(targetViewport);
-  const band = 20;
+  const band = 22;
   return (
     Math.abs(point.x - margin) <= band ||
     Math.abs(point.x - (targetViewport.width - margin)) <= band ||
@@ -103,7 +84,7 @@ function isNearSafeBoundary(point: Point, targetViewport = viewport): boolean {
 
 function hasOppositeBoundaryAxis(start: Point, end: Point, targetViewport = viewport): boolean {
   const margin = safeMargin(targetViewport);
-  const band = 24;
+  const band = 28;
   const sl = Math.abs(start.x - margin) <= band;
   const sr = Math.abs(start.x - (targetViewport.width - margin)) <= band;
   const st = Math.abs(start.y - margin) <= band;
@@ -120,14 +101,15 @@ function generate(seed: string, courseLengthId: CourseLengthId, overlapDifficult
   return generatePath({ ...daily, seed, courseLengthId, overlapDifficultyId, visibilityLevel: "normal", viewport: targetViewport });
 }
 
-describe("self-avoiding curvature generator", () => {
-  test("uses the self-avoiding-curvature-v4 curve, not a serpentine template", () => {
+describe("organic spline path generator", () => {
+  test("uses a single continuous organic spline definition, not the self-avoiding meander", () => {
     const path = generate("hiddenline-kind", "basic", "complex");
-    expect(path.curve?.kind).toBe("self-avoiding-curvature-v4");
+    expect(path.curve?.kind).toBe("organic-spline-v5");
     expect(path.curve?.seed).toBe(path.seed);
     expect(path.curve?.start).toEqual({ x: path.start.x, y: path.start.y });
     expect(path.curve?.end).toEqual({ x: path.end.x, y: path.end.y });
     expect(path.curve?.sampleSpacingPx).toBe(3.5);
+    expect(path.curve?.construction).toBe("seeded-anchor-walk-chaikin-smooth");
   });
 
   test("same seed and settings produce an identical path", () => {
@@ -151,79 +133,72 @@ describe("self-avoiding curvature generator", () => {
       expect(isNearSafeBoundary(path.start, playViewport), `${courseLengthId}/start`).toBe(true);
       expect(isNearSafeBoundary(path.end, playViewport), `${courseLengthId}/end`).toBe(true);
       expect(hasOppositeBoundaryAxis(path.start, path.end, playViewport), `${courseLengthId}/opposite`).toBe(true);
-      expect(Math.hypot(path.start.x - path.end.x, path.start.y - path.end.y), `${courseLengthId}/separation`).toBeGreaterThanOrEqual(diagonal * 0.4);
+      expect(Math.hypot(path.start.x - path.end.x, path.start.y - path.end.y), `${courseLengthId}/separation`).toBeGreaterThanOrEqual(diagonal * 0.32);
     }
-  });
-
-  test("paths never self-intersect across every course and overlap setting", () => {
-    for (const courseLengthId of COURSES) {
-      for (const overlapDifficultyId of OVERLAPS) {
-        const path = generate(`hiddenline-cross:${courseLengthId}:${overlapDifficultyId}`, courseLengthId, overlapDifficultyId);
-        expect(path.selfIntersectionCount, `${courseLengthId}/${overlapDifficultyId}`).toBe(0);
-        expect(countSelfIntersections(path.points), `${courseLengthId}/${overlapDifficultyId}`).toBe(0);
-        expect(hasSelfIntersection(path.points), `${courseLengthId}/${overlapDifficultyId}`).toBe(false);
-      }
-    }
-  });
-
-  test("arcs stay large (no small circles) per overlap profile", () => {
-    for (const overlapDifficultyId of OVERLAPS) {
-      const target = OVERLAP_SHAPE_PROFILES[overlapDifficultyId].minTurnRadiusPx;
-      const path = generate(`hiddenline-radius:${overlapDifficultyId}`, "marathon", overlapDifficultyId);
-      expect(minTurnRadius(path.points), overlapDifficultyId).toBeGreaterThanOrEqual(target * 0.8);
-    }
-  });
-
-  test("non-adjacent passes keep the overlap profile clearance", () => {
-    for (const overlapDifficultyId of OVERLAPS) {
-      const clearance = OVERLAP_SHAPE_PROFILES[overlapDifficultyId].selfClearancePx;
-      const exclusion = Math.ceil((clearance * 1.7) / 3.5);
-      const path = generate(`hiddenline-clearance:${overlapDifficultyId}`, "marathon", overlapDifficultyId);
-      expect(minNonAdjacentClearance(path.points, exclusion), overlapDifficultyId).toBeGreaterThanOrEqual(clearance * 0.82);
-    }
-  });
-
-  test("curve is smooth: uniform spacing and no micro-wiggle", () => {
-    for (const overlapDifficultyId of OVERLAPS) {
-      const path = generate(`hiddenline-smooth:${overlapDifficultyId}`, "longRun", overlapDifficultyId);
-      expect(maxSegmentLength(path.points), overlapDifficultyId).toBeLessThanOrEqual(4.5);
-      expect(maxHeadingChangeOverDistance(path.points, 32), overlapDifficultyId).toBeLessThan(Math.PI / 4);
-    }
-  });
-
-  test("length never exceeds the 2000px ceiling and lands in the course range", () => {
-    for (const courseLengthId of COURSES) {
-      const range = PATH_LENGTH_RANGES_PX[courseLengthId];
-      const path = generate(`hiddenline-length:${courseLengthId}`, courseLengthId, "normal");
-      expect(path.totalLength, courseLengthId).toBeLessThanOrEqual(2000);
-      expect(path.totalLength, courseLengthId).toBeGreaterThanOrEqual(range.min);
-      expect(path.totalLength, courseLengthId).toBeLessThanOrEqual(range.max);
-      expect(path.usedFallback, courseLengthId).toBe(false);
-    }
-  });
-
-  test("longer courses are longer on average", () => {
-    const average = (courseLengthId: CourseLengthId): number => {
-      let sum = 0;
-      const seeds = 8;
-      for (let s = 0; s < seeds; s += 1) sum += generate(`hiddenline-order:${courseLengthId}:${s}`, courseLengthId, "normal").totalLength;
-      return sum / seeds;
-    };
-    expect(average("basic")).toBeGreaterThan(average("short"));
-    expect(average("marathon")).toBeGreaterThan(average("basic"));
   });
 
   test("all points stay inside the safe margin", () => {
     const margin = safeMargin(playViewport);
-    for (const overlapDifficultyId of OVERLAPS) {
-      const path = generate(`hiddenline-margin:${overlapDifficultyId}`, "marathon", overlapDifficultyId);
-      for (const point of path.points) {
-        expect(point.x).toBeGreaterThanOrEqual(margin - 0.01);
-        expect(point.x).toBeLessThanOrEqual(playViewport.width - margin + 0.01);
-        expect(point.y).toBeGreaterThanOrEqual(margin - 0.01);
-        expect(point.y).toBeLessThanOrEqual(playViewport.height - margin + 0.01);
+    for (const courseLengthId of COURSES) {
+      for (const overlapDifficultyId of OVERLAPS) {
+        const path = generate(`hiddenline-margin:${courseLengthId}:${overlapDifficultyId}`, courseLengthId, overlapDifficultyId);
+        for (const point of path.points) {
+          expect(point.x, `${courseLengthId}/${overlapDifficultyId}/x`).toBeGreaterThanOrEqual(margin - 0.01);
+          expect(point.x, `${courseLengthId}/${overlapDifficultyId}/x`).toBeLessThanOrEqual(playViewport.width - margin + 0.01);
+          expect(point.y, `${courseLengthId}/${overlapDifficultyId}/y`).toBeGreaterThanOrEqual(margin - 0.01);
+          expect(point.y, `${courseLengthId}/${overlapDifficultyId}/y`).toBeLessThanOrEqual(playViewport.height - margin + 0.01);
+        }
       }
     }
+  });
+
+  test("curve is smooth: uniform spacing and no visible corner joins", () => {
+    for (const courseLengthId of COURSES) {
+      const profile = ORGANIC_CURVE_PROFILES[courseLengthId];
+      const path = generate(`hiddenline-smooth:${courseLengthId}`, courseLengthId, "complex");
+      expect(maxSegmentLength(path.points), courseLengthId).toBeLessThanOrEqual(4.6);
+      expect(minTurnRadius(path.points), courseLengthId).toBeGreaterThanOrEqual(profile.minTurnRadiusPx * 0.68);
+      expect(maxInstantHeadingDelta(path.points), courseLengthId).toBeLessThan(0.42);
+    }
+  });
+
+  test("course stages become longer in order on average", () => {
+    const averageLength = (courseLengthId: CourseLengthId): number => {
+      let length = 0;
+      const seeds = 10;
+      for (let s = 0; s < seeds; s += 1) {
+        const path = generate(`hiddenline-order:${courseLengthId}:${s}`, courseLengthId, "complex");
+        length += path.totalLength;
+      }
+      return length / seeds;
+    };
+
+    const measured = COURSES.map(averageLength);
+    for (let index = 1; index < measured.length; index += 1) {
+      expect(measured[index], `${COURSES[index]}/length`).toBeGreaterThan(measured[index - 1] * 1.06);
+    }
+  });
+
+  test("harder stages may cross naturally, but crossings are measured rather than forced", () => {
+    const easy = generate("hiddenline-crossing-easy", "short", "light");
+    const expert = generate("hiddenline-crossing-expert", "marathon", "master");
+    expect(easy.selfIntersectionCount).toBe(countSelfIntersections(easy.points));
+    expect(expert.selfIntersectionCount).toBe(countSelfIntersections(expert.points));
+    expect(expert.totalLength).toBeGreaterThan(easy.totalLength * 1.45);
+    expect(expert.complexityScore).toBeGreaterThan(easy.complexityScore);
+  });
+
+  test("natural crossings are not fixed per course template", () => {
+    const crossingCounts = new Set<number>();
+    const signatures = new Set<string>();
+    for (let seedIndex = 0; seedIndex < 10; seedIndex += 1) {
+      const path = generate(`hiddenline-natural-topology:${seedIndex}`, "marathon", "master");
+      crossingCounts.add(path.selfIntersectionCount);
+      signatures.add(`${path.selfIntersectionCount}:${path.curve?.occupancy.widthRatio.toFixed(2)}:${path.curve?.occupancy.heightRatio.toFixed(2)}:${Math.round(path.totalLength / 50)}`);
+    }
+
+    expect(crossingCounts.size).toBeGreaterThan(1);
+    expect(signatures.size).toBeGreaterThan(5);
   });
 
   test("progressT is monotonic with positive length", () => {
@@ -254,25 +229,22 @@ describe("self-avoiding curvature generator", () => {
     const precision = generatePath({ ...daily, seed: "hiddenline-legacy-precision", lineType: "precision", generatorProfileId: "precision-focus-v1", viewport: playViewport });
     expect(warmup.courseLengthId).toBe("short");
     expect(precision.courseLengthId).toBe("marathon");
-    expect(countSelfIntersections(warmup.points)).toBe(0);
-    expect(countSelfIntersections(precision.points)).toBe(0);
+    expect(warmup.usedFallback).toBe(false);
+    expect(precision.usedFallback).toBe(false);
   });
 
-  test("bulk: every course/overlap combo yields a valid, non-crossing curve", () => {
+  test("bulk: every course/overlap combo yields a valid organic curve without fallback", () => {
     let total = 0;
-    let crossing = 0;
     for (const courseLengthId of COURSES) {
       for (const overlapDifficultyId of OVERLAPS) {
         for (let s = 0; s < 6; s += 1) {
           const path = generate(`hiddenline-bulk:${courseLengthId}:${overlapDifficultyId}:${s}`, courseLengthId, overlapDifficultyId);
           total += 1;
-          if (path.selfIntersectionCount !== 0) crossing += 1;
-          expect(path.totalLength).toBeLessThanOrEqual(2000);
-          expect(path.usedFallback).toBe(false);
+          expect(path.totalLength, `${courseLengthId}/${overlapDifficultyId}/${s}`).toBeGreaterThan(ORGANIC_CURVE_PROFILES[courseLengthId].softLengthRangePx.min * 0.75);
+          expect(path.usedFallback, `${courseLengthId}/${overlapDifficultyId}/${s}`).toBe(false);
         }
       }
     }
-    expect(crossing).toBe(0);
     expect(total).toBe(150);
   });
 });

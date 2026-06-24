@@ -1,4 +1,4 @@
-import { DIFFICULTIES, OVERLAP_SHAPE_PROFILES, PATH_LENGTH_RANGES_PX } from "./config";
+import { DIFFICULTIES, ORGANIC_CURVE_PROFILES, ORGANIC_OVERLAP_PROFILES } from "./config";
 import { clamp, distance } from "./pathGeometry";
 import { createRng } from "./random";
 import type {
@@ -29,33 +29,33 @@ type PathGenerationInput = Omit<DailyContext, "difficulty"> & {
 };
 
 type SafeBox = { minX: number; minY: number; maxX: number; maxY: number };
-type CurveProfile = {
+type OrganicProfile = (typeof ORGANIC_CURVE_PROFILES)[CourseLengthId] & {
   courseLengthId: CourseLengthId;
   overlapDifficultyId: OverlapDifficultyId;
-  lengthRangePx: { min: number; max: number };
   minTurnRadiusPx: number;
-  selfClearancePx: number;
+  turnPressure: number;
+  complexityBoost: number;
 };
 type Candidate = {
+  rawPoints: Point[];
   points: PathPoint[];
   totalLength: number;
   start: Point;
   end: Point;
-  swings: number;
+  anchorCount: number;
   selfIntersectionCount: number;
   minTurnRadiusMeasured: number;
-  minClearanceMeasured: number;
+  maxHeadingDelta: number;
   occupancy: { widthRatio: number; heightRatio: number };
+  measuredDifficultyScore: number;
   valid: boolean;
-  inRange: boolean;
   usedFallback: boolean;
+  attemptIndex: number;
 };
 
-const KIND = "self-avoiding-curvature-v4" as const;
+const KIND = "organic-spline-v5" as const;
 const SAMPLE_SPACING_PX = 3.5;
-const BUILD_SPACING_PX = 5;
-const ABSOLUTE_MAX_LENGTH_PX = 2000;
-const MAX_ATTEMPTS = 48;
+const MAX_ATTEMPTS = 32;
 
 const overlapByLineDifficulty: Record<LineDifficultyId, OverlapDifficultyId> = {
   easy: "normal",
@@ -75,7 +75,7 @@ function safeMargin(viewport: Viewport): number {
 }
 
 function makeBox(viewport: Viewport): SafeBox {
-  const margin = safeMargin(viewport);
+  const margin = safeMargin(viewport) + Math.min(10, Math.min(viewport.width, viewport.height) * 0.025);
   return { minX: margin, minY: margin, maxX: viewport.width - margin, maxY: viewport.height - margin };
 }
 
@@ -83,129 +83,133 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-// Random start/end on opposite-ish safe edges, kept far apart.
 function pickStartEnd(rng: () => number, box: SafeBox): { start: Point; end: Point } {
   const horizontal = rng() < 0.5;
   const startLow = rng() < 0.5;
-  const startAlong = startLow ? lerp(0.05, 0.4, rng()) : lerp(0.6, 0.95, rng());
-  const endAlong = startLow ? lerp(0.6, 0.95, rng()) : lerp(0.05, 0.4, rng());
-  const startInset = rng() * 12;
-  const endInset = rng() * 12;
+  const startAlong = startLow ? lerp(0.08, 0.36, rng()) : lerp(0.64, 0.92, rng());
+  const endAlong = startLow ? lerp(0.64, 0.92, rng()) : lerp(0.08, 0.36, rng());
+  const startInset = rng() * 10;
+  const endInset = rng() * 10;
 
   if (horizontal) {
     const startLeft = rng() < 0.5;
     return {
-      start: { x: startLeft ? box.minX + startInset : box.maxX - startInset, y: lerp(box.minY + 12, box.maxY - 12, startAlong) },
-      end: { x: startLeft ? box.maxX - endInset : box.minX + endInset, y: lerp(box.minY + 12, box.maxY - 12, endAlong) },
+      start: { x: startLeft ? box.minX + startInset : box.maxX - startInset, y: lerp(box.minY + 16, box.maxY - 16, startAlong) },
+      end: { x: startLeft ? box.maxX - endInset : box.minX + endInset, y: lerp(box.minY + 16, box.maxY - 16, endAlong) },
     };
   }
 
   const startTop = rng() < 0.5;
   return {
-    start: { x: lerp(box.minX + 12, box.maxX - 12, startAlong), y: startTop ? box.minY + startInset : box.maxY - startInset },
-    end: { x: lerp(box.minX + 12, box.maxX - 12, endAlong), y: startTop ? box.maxY - endInset : box.minY + endInset },
+    start: { x: lerp(box.minX + 16, box.maxX - 16, startAlong), y: startTop ? box.minY + startInset : box.maxY - startInset },
+    end: { x: lerp(box.minX + 16, box.maxX - 16, endAlong), y: startTop ? box.maxY - endInset : box.minY + endInset },
   };
 }
 
-// Build a single smooth meander from start to end. The curve advances along the
-// start->end axis (so it can never fold back over itself) while swinging sideways
-// like a randomized wave. Swing count + amplitude are chosen so the wave hits the
-// wanted length while keeping its curvature under the min-turn-radius limit, which
-// is what guarantees big, round arcs instead of tight curls. Nothing here is a
-// fixed template: axis, length, swing count, amplitude envelope, drift and bow are
-// all seed-random, and the curve is not forced through any exact coordinate.
-function buildMeander(rng: () => number, box: SafeBox, profile: CurveProfile, targetLengthPx: number): { points: Point[]; swings: number } {
+function resolveProfile(courseLengthId: CourseLengthId, overlapDifficultyId: OverlapDifficultyId): OrganicProfile {
+  const base = ORGANIC_CURVE_PROFILES[courseLengthId];
+  const overlap = ORGANIC_OVERLAP_PROFILES[overlapDifficultyId];
+  return {
+    ...base,
+    courseLengthId,
+    overlapDifficultyId,
+    minTurnRadiusPx: base.minTurnRadiusPx * overlap.minTurnRadiusScale,
+    turnPressure: clamp(base.turnPressure + overlap.turnPressureBoost, 0, 1),
+    complexityBoost: overlap.complexityBoost,
+  };
+}
+
+function buildOrganicAnchors(rng: () => number, box: SafeBox, profile: OrganicProfile): Point[] {
   const { start, end } = pickStartEnd(rng, box);
-  const axisX = end.x - start.x;
-  const axisY = end.y - start.y;
-  const forwardSpan = Math.hypot(axisX, axisY) || 1;
-  const ux = axisX / forwardSpan;
-  const uy = axisY / forwardSpan;
-  const vx = -uy;
-  const vy = ux;
-  const minR = profile.minTurnRadiusPx;
+  const center = { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 };
+  const anchorCount = Math.max(7, profile.anchorCount + Math.floor(lerp(-2, 3, rng())));
+  const targetLength = lerp(profile.softLengthRangePx.min, profile.softLengthRangePx.max, rng());
+  const baseStep = targetLength / Math.max(1, anchorCount - 1);
+  const maxRandomTurn = lerp(0.28, 0.74, profile.turnPressure) + profile.complexityBoost * 0.08;
+  const anchors: Point[] = [start];
+  let current = start;
+  let heading = Math.atan2(end.y - start.y, end.x - start.x) + lerp(-1.2, 1.2, rng()) * (0.35 + profile.turnPressure * 0.28);
 
-  // Measured sideways room from the axis line to the box boundary (worst case
-  // along the path), so the wave provably fits without being clamped — clamping
-  // is what produced flat spots and sharp corners.
-  const perpHalf = Math.max(24, perpendicularRoom(start, end, vx, vy, box) - 6);
-  // Reserve part of the room for a gentle whole-curve bow, leave the rest for the
-  // swing so hump + bow can never leave the box.
-  const bowAmp = (rng() - 0.5) * perpHalf * 0.3;
-  const humpCap = Math.max(18, perpHalf - Math.abs(bowAmp) - 4);
+  for (let index = 1; index < anchorCount - 1; index += 1) {
+    const progress = index / (anchorCount - 1);
+    const toEnd = Math.atan2(end.y - current.y, end.x - current.x);
+    const toCenter = Math.atan2(center.y - current.y, center.x - current.x);
+    const endPull = Math.max(0, progress - 0.56) * 0.58;
+    const centerPull = edgePressure(current, box) * 0.72;
+    heading = blendAngles(heading, toCenter, centerPull);
+    heading = blendAngles(heading, toEnd, endPull);
+    heading += lerp(-maxRandomTurn, maxRandomTurn, rng());
 
-  // Pick the half-swing count m (k*forwardSpan = pi*m, so the wave returns to the
-  // axis exactly at both ends). For each m find the amplitude that hits the length,
-  // capped by the min-radius limit and the box. Keep the m whose achievable length
-  // is closest to target.
-  const extra = Math.max(0, targetLengthPx - forwardSpan);
-  let bestM = 1;
-  let bestAmp = 0;
-  let bestErr = Number.POSITIVE_INFINITY;
-  for (let m = 1; m <= 16; m += 1) {
-    const k = (Math.PI * m) / forwardSpan;
-    const ampForLength = Math.sqrt((4 * forwardSpan * extra) / (Math.PI * Math.PI * m * m || 1));
-    const ampRadiusCap = 1 / (k * k * minR); // amplitude where peak curvature == 1/minR
-    const amp = Math.min(ampForLength, ampRadiusCap, humpCap);
-    if (amp < 16 && m > 1) continue;
-    const achievable = forwardSpan + (amp * amp * Math.PI * Math.PI * m * m) / (4 * forwardSpan);
-    const err = Math.abs(achievable - targetLengthPx);
-    if (err < bestErr) {
-      bestErr = err;
-      bestM = m;
-      bestAmp = amp;
+    let step = baseStep * lerp(0.72, 1.18, rng());
+    let next = { x: current.x + Math.cos(heading) * step, y: current.y + Math.sin(heading) * step };
+    for (let retry = 0; retry < 8 && !pointInside(next, box); retry += 1) {
+      const avoid = Math.atan2(center.y - current.y, center.x - current.x);
+      heading = blendAngles(heading, avoid, 0.65) + lerp(-0.38, 0.38, rng());
+      step *= 0.86;
+      next = { x: current.x + Math.cos(heading) * step, y: current.y + Math.sin(heading) * step };
     }
+    if (!pointInside(next, box)) {
+      next = {
+        x: clamp(next.x, box.minX + 6, box.maxX - 6),
+        y: clamp(next.y, box.minY + 6, box.maxY - 6),
+      };
+    }
+    anchors.push(next);
+    current = next;
   }
 
-  const k = (Math.PI * bestM) / forwardSpan;
-  const swings = bestM / 2;
-  // Gentle organic variation that still vanishes at both ends.
-  const envFreq = lerp(0.6, 1.4, rng());
-  const envPhase = rng() * Math.PI * 2;
-  const envDepth = lerp(0.12, 0.28, rng());
-  const bowPhase = rng() * Math.PI;
-  const flip = rng() < 0.5 ? 1 : -1;
+  anchors.push(end);
+  return anchors;
+}
 
-  const sampleCount = Math.max(48, Math.ceil(forwardSpan / BUILD_SPACING_PX));
-  const points: Point[] = [];
-  for (let i = 0; i <= sampleCount; i += 1) {
-    const t = i / sampleCount;
-    const along = t * forwardSpan;
-    const window = Math.sin(Math.PI * t); // 0 at both ends -> endpoints stay exact
-    const envelope = 1 - envDepth + envDepth * Math.sin(Math.PI * 2 * t * envFreq + envPhase);
-    const hump = flip * bestAmp * envelope * Math.sin(k * along);
-    const bow = bowAmp * window * Math.sin(Math.PI * t + bowPhase);
-    const lateral = hump + bow;
-    points.push({
-      x: clamp(start.x + ux * along + vx * lateral, box.minX, box.maxX),
-      y: clamp(start.y + uy * along + vy * lateral, box.minY, box.maxY),
+function angleDelta(a: number, b: number): number {
+  return Math.atan2(Math.sin(b - a), Math.cos(b - a));
+}
+
+function blendAngles(from: number, to: number, amount: number): number {
+  return from + angleDelta(from, to) * clamp(amount, 0, 1);
+}
+
+function pointInside(point: Point, box: SafeBox): boolean {
+  return point.x >= box.minX && point.x <= box.maxX && point.y >= box.minY && point.y <= box.maxY;
+}
+
+function edgePressure(point: Point, box: SafeBox): number {
+  const inset = Math.min(point.x - box.minX, box.maxX - point.x, point.y - box.minY, box.maxY - point.y);
+  return clamp((56 - inset) / 56, 0, 1);
+}
+
+function smoothPoints(points: Point[], passes: number): Point[] {
+  let current = points.slice();
+  for (let pass = 0; pass < passes; pass += 1) {
+    const next = current.map((point, index) => {
+      if (index === 0 || index === current.length - 1) return point;
+      const previous = current[index - 1];
+      const following = current[index + 1];
+      return {
+        x: previous.x * 0.22 + point.x * 0.56 + following.x * 0.22,
+        y: previous.y * 0.22 + point.y * 0.56 + following.y * 0.22,
+      };
     });
+    current = next;
   }
-  points[0] = { x: start.x, y: start.y };
-  points[points.length - 1] = { x: end.x, y: end.y };
-
-  return { points, swings };
+  return current;
 }
 
-function rayToBox(px: number, py: number, dx: number, dy: number, box: SafeBox): number {
-  let tHit = Number.POSITIVE_INFINITY;
-  if (dx > 1e-6) tHit = Math.min(tHit, (box.maxX - px) / dx);
-  else if (dx < -1e-6) tHit = Math.min(tHit, (box.minX - px) / dx);
-  if (dy > 1e-6) tHit = Math.min(tHit, (box.maxY - py) / dy);
-  else if (dy < -1e-6) tHit = Math.min(tHit, (box.minY - py) / dy);
-  return tHit;
-}
-
-// Worst-case sideways room from the start->end axis to the box boundary.
-function perpendicularRoom(start: Point, end: Point, vx: number, vy: number, box: SafeBox): number {
-  let room = Number.POSITIVE_INFINITY;
-  for (let s = 1; s <= 9; s += 1) {
-    const t = s / 10;
-    const px = start.x + (end.x - start.x) * t;
-    const py = start.y + (end.y - start.y) * t;
-    room = Math.min(room, rayToBox(px, py, vx, vy, box), rayToBox(px, py, -vx, -vy, box));
+function chaikinSmooth(points: Point[], iterations: number): Point[] {
+  let current = points.slice();
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const next: Point[] = [current[0]];
+    for (let index = 0; index < current.length - 1; index += 1) {
+      const a = current[index];
+      const b = current[index + 1];
+      next.push({ x: a.x * 0.72 + b.x * 0.28, y: a.y * 0.72 + b.y * 0.28 });
+      next.push({ x: a.x * 0.28 + b.x * 0.72, y: a.y * 0.28 + b.y * 0.72 });
+    }
+    next.push(current[current.length - 1]);
+    current = next;
   }
-  return Math.max(0, room);
+  return current;
 }
 
 function resamplePolyline(points: Point[], spacingPx: number): Point[] {
@@ -297,33 +301,15 @@ function measureMinTurnRadius(points: Point[]): number {
   return min;
 }
 
-// Smallest distance between two non-adjacent points, via a uniform grid.
-function measureMinClearance(points: Point[], clearancePx: number, exclusion: number): number {
-  const cell = Math.max(clearancePx, 20);
-  const buckets = new Map<number, number[]>();
-  const key = (x: number, y: number): number => Math.floor(x / cell) * 100003 + Math.floor(y / cell);
-  let min = Number.POSITIVE_INFINITY;
-
-  for (let i = 0; i < points.length; i += 1) {
-    const cx = Math.floor(points[i].x / cell);
-    const cy = Math.floor(points[i].y / cell);
-    for (let gx = cx - 1; gx <= cx + 1; gx += 1) {
-      for (let gy = cy - 1; gy <= cy + 1; gy += 1) {
-        const bucket = buckets.get(gx * 100003 + gy);
-        if (!bucket) continue;
-        for (const j of bucket) {
-          if (i - j <= exclusion) continue;
-          const d = distance(points[i], points[j]);
-          if (d < min) min = d;
-        }
-      }
-    }
-    const k = key(points[i].x, points[i].y);
-    const own = buckets.get(k);
-    if (own) own.push(i);
-    else buckets.set(k, [i]);
+function maxHeadingDelta(points: Point[]): number {
+  let maxDelta = 0;
+  for (let index = 2; index < points.length; index += 1) {
+    const previous = Math.atan2(points[index - 1].y - points[index - 2].y, points[index - 1].x - points[index - 2].x);
+    const next = Math.atan2(points[index].y - points[index - 1].y, points[index].x - points[index - 1].x);
+    const delta = Math.abs(Math.atan2(Math.sin(next - previous), Math.cos(next - previous)));
+    maxDelta = Math.max(maxDelta, delta);
   }
-  return min;
+  return maxDelta;
 }
 
 function occupancyOf(points: Point[], box: SafeBox): { widthRatio: number; heightRatio: number } {
@@ -332,10 +318,10 @@ function occupancyOf(points: Point[], box: SafeBox): { widthRatio: number; heigh
   let minY = Number.POSITIVE_INFINITY;
   let maxY = Number.NEGATIVE_INFINITY;
   for (const point of points) {
-    if (point.x < minX) minX = point.x;
-    if (point.x > maxX) maxX = point.x;
-    if (point.y < minY) minY = point.y;
-    if (point.y > maxY) maxY = point.y;
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
   }
   return {
     widthRatio: (maxX - minX) / Math.max(1, box.maxX - box.minX),
@@ -343,95 +329,128 @@ function occupancyOf(points: Point[], box: SafeBox): { widthRatio: number; heigh
   };
 }
 
-function evaluateCandidate(rawPoints: Point[], swings: number, box: SafeBox, profile: CurveProfile): Candidate {
+function fitPointsInsideBox(points: Point[], box: SafeBox): Point[] {
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const point of points) {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+  }
+
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const availableWidth = box.maxX - box.minX;
+  const availableHeight = box.maxY - box.minY;
+  const scale = Math.min(1, availableWidth / width, availableHeight / height);
+  const sourceCenter = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+  const targetCenter = {
+    x: clamp(sourceCenter.x, box.minX + (width * scale) / 2, box.maxX - (width * scale) / 2),
+    y: clamp(sourceCenter.y, box.minY + (height * scale) / 2, box.maxY - (height * scale) / 2),
+  };
+
+  return points.map((point) => ({
+    x: targetCenter.x + (point.x - sourceCenter.x) * scale,
+    y: targetCenter.y + (point.y - sourceCenter.y) * scale,
+  }));
+}
+
+function staysInside(points: Point[], box: SafeBox): boolean {
+  return points.every((point) => point.x >= box.minX - 0.01 && point.x <= box.maxX + 0.01 && point.y >= box.minY - 0.01 && point.y <= box.maxY + 0.01);
+}
+
+function difficultyScore(candidate: Omit<Candidate, "measuredDifficultyScore" | "valid" | "usedFallback">, profile: OrganicProfile): number {
+  const occupancy = (candidate.occupancy.widthRatio + candidate.occupancy.heightRatio) / 2;
+  const turnBurden = Number.isFinite(candidate.minTurnRadiusMeasured) ? 1 / Math.max(24, candidate.minTurnRadiusMeasured) : 0;
+  return (
+    profile.rank * 10 +
+    profile.complexityBoost * 3 +
+    candidate.totalLength / 160 +
+    candidate.selfIntersectionCount * 1.35 +
+    occupancy * profile.occupancyWeight * 3.2 +
+    turnBurden * 180
+  );
+}
+
+function evaluateCandidate(rawPoints: Point[], anchorCount: number, box: SafeBox, profile: OrganicProfile, attemptIndex: number): Candidate {
   const resampled = resamplePolyline(rawPoints, SAMPLE_SPACING_PX);
   const annotated = annotate(resampled);
   const totalLength = annotated[annotated.length - 1]?.distance ?? 0;
   const selfIntersectionCount = countSelfIntersections(resampled);
   const minTurnRadiusMeasured = measureMinTurnRadius(resampled);
-  const exclusion = Math.ceil((profile.selfClearancePx * 1.7) / SAMPLE_SPACING_PX);
-  const minClearanceMeasured = measureMinClearance(resampled, profile.selfClearancePx, exclusion);
-
-  const valid =
-    totalLength > 0 &&
-    totalLength <= ABSOLUTE_MAX_LENGTH_PX &&
-    selfIntersectionCount === 0 &&
-    minTurnRadiusMeasured >= profile.minTurnRadiusPx * 0.82 &&
-    minClearanceMeasured >= profile.selfClearancePx * 0.85;
-  const inRange = totalLength >= profile.lengthRangePx.min && totalLength <= profile.lengthRangePx.max;
-
-  return {
+  const heading = maxHeadingDelta(resampled);
+  const occupancy = occupancyOf(resampled, box);
+  const base = {
+    rawPoints,
     points: annotated,
     totalLength,
     start: { x: annotated[0].x, y: annotated[0].y },
     end: { x: annotated[annotated.length - 1].x, y: annotated[annotated.length - 1].y },
-    swings,
+    anchorCount,
     selfIntersectionCount,
     minTurnRadiusMeasured,
-    minClearanceMeasured,
-    occupancy: occupancyOf(resampled, box),
+    maxHeadingDelta: heading,
+    occupancy,
+    attemptIndex,
+  };
+  const valid =
+    totalLength > profile.softLengthRangePx.min * 0.58 &&
+    totalLength <= profile.safetyMaxLengthPx &&
+    staysInside(resampled, box) &&
+    minTurnRadiusMeasured >= profile.minTurnRadiusPx * 0.58 &&
+    heading < 0.48;
+  return {
+    ...base,
+    measuredDifficultyScore: difficultyScore(base, profile),
     valid,
-    inRange,
     usedFallback: false,
   };
 }
 
-function resolveProfile(courseLengthId: CourseLengthId, overlapDifficultyId: OverlapDifficultyId): CurveProfile {
-  const shape = OVERLAP_SHAPE_PROFILES[overlapDifficultyId];
-  return {
-    courseLengthId,
-    overlapDifficultyId,
-    lengthRangePx: PATH_LENGTH_RANGES_PX[courseLengthId],
-    minTurnRadiusPx: shape.minTurnRadiusPx,
-    selfClearancePx: shape.selfClearancePx,
-  };
+function targetLengthScore(totalLength: number, profile: OrganicProfile): number {
+  const mid = (profile.softLengthRangePx.min + profile.softLengthRangePx.max) / 2;
+  const width = Math.max(1, profile.softLengthRangePx.max - profile.softLengthRangePx.min);
+  return 1 - Math.min(1, Math.abs(totalLength - mid) / width);
 }
 
-function pickBestCandidate(seed: string, profile: CurveProfile, box: SafeBox, attempts: number): Candidate {
-  // Length in a phone-narrow box is capped once we keep the arcs large and
-  // non-crossing, so we treat the course range as a target and return the valid
-  // curve closest to it rather than forcing an exact length.
-  const targetMid = (profile.lengthRangePx.min + profile.lengthRangePx.max) / 2;
+function candidatePickScore(candidate: Candidate, profile: OrganicProfile): number {
+  const occupancy = (candidate.occupancy.widthRatio + candidate.occupancy.heightRatio) / 2;
+  const smoothPenalty = Math.max(0, candidate.maxHeadingDelta - 0.24) * 14;
+  return targetLengthScore(candidate.totalLength, profile) * 8 + occupancy * profile.occupancyWeight * 3 + candidate.measuredDifficultyScore / 12 - smoothPenalty;
+}
+
+function createCandidate(seed: string, profile: OrganicProfile, box: SafeBox, attemptIndex: number): Candidate {
+  const rng = createRng(`${seed}:${KIND}:${profile.courseLengthId}:${profile.overlapDifficultyId}:${attemptIndex}`);
+  const anchors = buildOrganicAnchors(rng, box, profile);
+  const rawPoints = chaikinSmooth(anchors, 4 + Math.min(2, profile.rank));
+  const smoothed = smoothPoints(rawPoints, 7 + profile.rank * 3);
+  const candidatePoints = staysInside(smoothed, box) ? smoothed : fitPointsInsideBox(smoothed, box);
+  return evaluateCandidate(candidatePoints, anchors.length, box, profile, attemptIndex);
+}
+
+function createFallback(seed: string, profile: OrganicProfile, box: SafeBox): Candidate {
+  const rng = createRng(`${seed}:${KIND}:fallback:${profile.courseLengthId}`);
+  const { start, end } = pickStartEnd(rng, box);
+  const mid: Point = {
+    x: (start.x + end.x) / 2 + (rng() - 0.5) * (box.maxX - box.minX) * 0.25,
+    y: (start.y + end.y) / 2 + (rng() - 0.5) * (box.maxY - box.minY) * 0.25,
+  };
+  const rawPoints = smoothPoints(chaikinSmooth([start, mid, end], 5), 6);
+  return { ...evaluateCandidate(rawPoints, 3, box, profile, 0), usedFallback: true };
+}
+
+function pickBestCandidate(seed: string, profile: OrganicProfile, box: SafeBox, attempts: number): Candidate {
   let bestValid: Candidate | null = null;
   let bestAny: Candidate | null = null;
-
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const rng = createRng(`${seed}:${KIND}:${profile.courseLengthId}:${profile.overlapDifficultyId}:${attempt}`);
-    const targetLength = lerp(profile.lengthRangePx.min, profile.lengthRangePx.max, rng());
-    const meander = buildMeander(rng, box, profile, targetLength);
-    const candidate = evaluateCandidate(meander.points, meander.swings, box, profile);
-
-    if (!bestAny) bestAny = candidate;
-
-    if (candidate.valid) {
-      if (!bestValid || Math.abs(candidate.totalLength - targetMid) < Math.abs(bestValid.totalLength - targetMid)) {
-        bestValid = candidate;
-      }
-    }
+    const candidate = createCandidate(seed, profile, box, attempt);
+    if (!bestAny || candidatePickScore(candidate, profile) > candidatePickScore(bestAny, profile)) bestAny = candidate;
+    if (candidate.valid && (!bestValid || candidatePickScore(candidate, profile) > candidatePickScore(bestValid, profile))) bestValid = candidate;
   }
-
-  // A valid curve that lands a little short of the course target is still a real
-  // curve, not a fallback; only a missing valid curve counts as fallback.
-  if (bestValid) return bestValid;
-  if (bestAny) return { ...bestAny, usedFallback: true };
-
-  const rng = createRng(`${seed}:${KIND}:degenerate`);
-  const { start, end } = pickStartEnd(rng, box);
-  const simple = annotate(resamplePolyline([start, end], SAMPLE_SPACING_PX));
-  return {
-    points: simple,
-    totalLength: simple[simple.length - 1]?.distance ?? 0,
-    start,
-    end,
-    swings: 0,
-    selfIntersectionCount: 0,
-    minTurnRadiusMeasured: Number.POSITIVE_INFINITY,
-    minClearanceMeasured: Number.POSITIVE_INFINITY,
-    occupancy: occupancyOf([start, end], box),
-    valid: false,
-    inRange: false,
-    usedFallback: true,
-  };
+  return bestValid ?? (bestAny ? { ...bestAny, usedFallback: true } : createFallback(seed, profile, box));
 }
 
 export function generatePath(input: PathGenerationInput): GeneratedPath {
@@ -447,27 +466,29 @@ export function generatePath(input: PathGenerationInput): GeneratedPath {
   const box = makeBox(input.viewport);
   const profile = resolveProfile(courseLengthId, overlapDifficultyId);
   const candidate = pickBestCandidate(input.seed, profile, box, attempts);
-
   const points = candidate.points;
   const totalLength = candidate.totalLength;
-  const complexityScore = totalLength / Math.max(1, Math.min(input.viewport.width, input.viewport.height));
+  const complexityScore = candidate.measuredDifficultyScore;
 
   const curve: AnalyticCurveDefinition = {
     kind: KIND,
     seed: input.seed,
-    generatorVersion: "analytic-v2",
+    generatorVersion: "organic-v5",
     courseLengthId,
     overlapDifficultyId,
     start: candidate.start,
     end: candidate.end,
-    targetLengthRangePx: profile.lengthRangePx,
+    construction: "seeded-anchor-walk-chaikin-smooth",
+    softLengthRangePx: profile.softLengthRangePx,
     minTurnRadiusPx: profile.minTurnRadiusPx,
-    selfClearancePx: profile.selfClearancePx,
-    attractorCount: candidate.swings,
+    anchorCount: candidate.anchorCount,
+    turnPressure: profile.turnPressure,
     sampleSpacingPx: SAMPLE_SPACING_PX,
-    sourceSampleCount: points.length,
-    attemptIndex: 0,
+    pointCount: points.length,
+    attemptIndex: candidate.attemptIndex,
     usedFallback: candidate.usedFallback,
+    measuredDifficultyScore: candidate.measuredDifficultyScore,
+    measuredMinTurnRadiusPx: candidate.minTurnRadiusMeasured,
     occupancy: candidate.occupancy,
   };
 

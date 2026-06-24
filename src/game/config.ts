@@ -1,7 +1,7 @@
 import type { CourseLengthId, DifficultyId, GeneratorVersion, OverlapDifficultyId, VisibilityLevelId } from "./types";
 
 export const GAMEPLAY_DEFAULTS = {
-  generatorVersion: "analytic-v2" as GeneratorVersion,
+  generatorVersion: "organic-v5" as GeneratorVersion,
   seedNamespace: "hiddenline-daily",
   officialDailyDifficulty: "normal" as const,
   finishThresholdT: 0.98,
@@ -26,35 +26,82 @@ export const GAMEPLAY_DEFAULTS = {
   scoreMax: 1000,
 };
 
-// Course length nudges the arc-length target of the curve (CSS px). Keeping the
-// arcs large and non-crossing in a phone-narrow play box caps the clean length at
-// roughly 800px, so these ranges are deliberately modest and overlapping: the
-// course mainly shifts the target within the achievable band, not the hard max.
-// 2000px remains the absolute generator ceiling.
-export const PATH_LENGTH_RANGES_PX: Record<CourseLengthId, { min: number; max: number }> = {
-  short: { min: 480, max: 780 },
-  basic: { min: 520, max: 840 },
-  long: { min: 560, max: 900 },
-  longRun: { min: 600, max: 960 },
-  marathon: { min: 640, max: 1000 },
-};
-
-// Overlap difficulty controls curve "tightness": larger minTurnRadius keeps the
-// circles big ("원이 작지 않게"); smaller clearance lets the curve pass closer to
-// itself without crossing. attractorCount drives how much the curve roams.
-export const OVERLAP_SHAPE_PROFILES: Record<
-  OverlapDifficultyId,
+// Course controls the organic stroke burden. These values are not hard "must hit"
+// length/crossing quotas; the generator scores candidates by measured length,
+// broad loops, crossings, turns, and panel occupancy, then picks the best valid
+// curve for the requested stage.
+export const ORGANIC_CURVE_PROFILES: Record<
+  CourseLengthId,
   {
+    rank: number;
+    softLengthRangePx: { min: number; max: number };
+    safetyMaxLengthPx: number;
     minTurnRadiusPx: number;
-    selfClearancePx: number;
-    attractorCount: { min: number; max: number };
+    anchorCount: number;
+    turnPressure: number;
+    occupancyWeight: number;
   }
 > = {
-  light: { minTurnRadiusPx: 105, selfClearancePx: 64, attractorCount: { min: 2, max: 3 } },
-  normal: { minTurnRadiusPx: 90, selfClearancePx: 58, attractorCount: { min: 2, max: 4 } },
-  complex: { minTurnRadiusPx: 76, selfClearancePx: 50, attractorCount: { min: 3, max: 5 } },
-  hard: { minTurnRadiusPx: 64, selfClearancePx: 44, attractorCount: { min: 4, max: 6 } },
-  master: { minTurnRadiusPx: 56, selfClearancePx: 40, attractorCount: { min: 5, max: 7 } },
+  short: {
+    rank: 1,
+    softLengthRangePx: { min: 700, max: 1000 },
+    safetyMaxLengthPx: 1500,
+    minTurnRadiusPx: 2.5,
+    anchorCount: 8,
+    turnPressure: 0.08,
+    occupancyWeight: 0.8,
+  },
+  basic: {
+    rank: 2,
+    softLengthRangePx: { min: 880, max: 1280 },
+    safetyMaxLengthPx: 1700,
+    minTurnRadiusPx: 2.5,
+    anchorCount: 10,
+    turnPressure: 0.18,
+    occupancyWeight: 0.95,
+  },
+  long: {
+    rank: 3,
+    softLengthRangePx: { min: 1100, max: 1500 },
+    safetyMaxLengthPx: 1950,
+    minTurnRadiusPx: 2,
+    anchorCount: 13,
+    turnPressure: 0.32,
+    occupancyWeight: 1.12,
+  },
+  longRun: {
+    rank: 4,
+    softLengthRangePx: { min: 1320, max: 1800 },
+    safetyMaxLengthPx: 3000,
+    minTurnRadiusPx: 2,
+    anchorCount: 16,
+    turnPressure: 0.5,
+    occupancyWeight: 1.25,
+  },
+  marathon: {
+    rank: 5,
+    softLengthRangePx: { min: 1580, max: 2200 },
+    safetyMaxLengthPx: 3600,
+    minTurnRadiusPx: 2,
+    anchorCount: 20,
+    turnPressure: 0.72,
+    occupancyWeight: 1.38,
+  },
+};
+
+export const ORGANIC_OVERLAP_PROFILES: Record<
+  OverlapDifficultyId,
+  {
+    complexityBoost: number;
+    minTurnRadiusScale: number;
+    turnPressureBoost: number;
+  }
+> = {
+  light: { complexityBoost: 0, minTurnRadiusScale: 1.08, turnPressureBoost: -0.1 },
+  normal: { complexityBoost: 0.18, minTurnRadiusScale: 1.02, turnPressureBoost: -0.04 },
+  complex: { complexityBoost: 0.34, minTurnRadiusScale: 0.96, turnPressureBoost: 0 },
+  hard: { complexityBoost: 0.52, minTurnRadiusScale: 0.9, turnPressureBoost: 0.1 },
+  master: { complexityBoost: 0.72, minTurnRadiusScale: 0.82, turnPressureBoost: 0.2 },
 };
 
 export const VISIBILITY_LEVELS: Record<

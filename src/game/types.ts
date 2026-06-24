@@ -4,7 +4,7 @@ export type OverlapDifficultyId = "light" | "normal" | "complex" | "hard" | "mas
 export type LineDifficultyId = "easy" | "normal" | "hard";
 export type VisibilityLevelId = "easy" | "normal" | "hard";
 export type DifficultyId = LineDifficultyId | "expert";
-export type GeneratorVersion = "daily-v1" | "analytic-v2";
+export type GeneratorVersion = "daily-v1" | "analytic-v2" | "organic-v5";
 export type LineType = "warmup" | "main" | "curve" | "precision";
 export type GeneratorProfileId = "gentle-warmup-v1" | "daily-main-normal-v1" | "curve-control-v1" | "precision-focus-v1";
 export type ScoringProfileId =
@@ -22,24 +22,27 @@ export type PathPoint = Point & {
   u?: number;
 };
 
-// A single continuous, self-avoiding curve grown by curvature-driven walk.
-// There is no fixed template, no required waypoint coordinate, and no lane layout.
+// A single continuous organic curve. The path is generated as one smooth
+// parametric spline and then sampled into the polyline used by rendering/judging.
 export type AnalyticCurveDefinition = {
-  kind: "self-avoiding-curvature-v4";
+  kind: "organic-spline-v5";
   seed: string;
-  generatorVersion: "analytic-v2";
+  generatorVersion: "organic-v5";
   courseLengthId: CourseLengthId;
   overlapDifficultyId: OverlapDifficultyId;
   start: Point;
   end: Point;
-  targetLengthRangePx: { min: number; max: number };
+  construction: "seeded-anchor-walk-chaikin-smooth";
+  softLengthRangePx: { min: number; max: number };
   minTurnRadiusPx: number;
-  selfClearancePx: number;
-  attractorCount: number;
+  anchorCount: number;
+  turnPressure: number;
   sampleSpacingPx: number;
-  sourceSampleCount: number;
+  pointCount: number;
   attemptIndex: number;
   usedFallback: boolean;
+  measuredDifficultyScore: number;
+  measuredMinTurnRadiusPx: number;
   occupancy: { widthRatio: number; heightRatio: number };
 };
 
