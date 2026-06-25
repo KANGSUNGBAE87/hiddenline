@@ -46,6 +46,11 @@ describe("Google Play release readiness", () => {
     const buildGradle = read("android/app/build.gradle");
     expect(buildGradle).toContain('namespace = "com.kangsungbae.hiddenline"');
     expect(buildGradle).toContain('applicationId "com.kangsungbae.hiddenline"');
+    expect(buildGradle).toContain('versionCode 1');
+    expect(buildGradle).toContain('versionName "0.1.0"');
+    expect(buildGradle).toContain("keystore.properties");
+    expect(buildGradle).toContain("signingConfigs");
+    expect(buildGradle).toContain("signingConfig signingConfigs.release");
 
     const variables = read("android/variables.gradle");
     expect(extractGradleNumber(variables, "targetSdkVersion")).toBeGreaterThanOrEqual(35);
@@ -60,6 +65,8 @@ describe("Google Play release readiness", () => {
   test("provides store listing and privacy artifacts for Play Console", () => {
     expect(existsSync(resolve(root, "docs/google-play-release.md"))).toBe(true);
     expect(existsSync(resolve(root, "public/privacy.html"))).toBe(true);
+    expect(existsSync(resolve(root, "public/privacy-ko.html"))).toBe(true);
+    expect(existsSync(resolve(root, "public/privacy-en.html"))).toBe(true);
 
     const releaseDoc = read("docs/google-play-release.md");
     expect(releaseDoc).toContain("Package name: `com.kangsungbae.hiddenline`");
@@ -70,6 +77,18 @@ describe("Google Play release readiness", () => {
 
     const privacyHtml = read("public/privacy.html");
     expect(privacyHtml).toContain("Hidden Line Privacy Policy");
-    expect(privacyHtml).toContain("does not currently require account creation");
+    expect(privacyHtml).toContain("privacy-ko.html");
+    expect(privacyHtml).toContain("privacy-en.html");
+
+    const privacyKoHtml = read("public/privacy-ko.html");
+    expect(privacyKoHtml).toContain("Hidden Line 개인정보처리방침");
+    expect(privacyKoHtml).toContain("현재 빌드는 계정 생성, 로그인");
+    expect(privacyKoHtml).toContain("개발자 서버나 제3자에게 전송되지 않습니다");
+
+    const privacyEnHtml = read("public/privacy-en.html");
+    expect(privacyEnHtml).toContain("Hidden Line Privacy Policy");
+    expect(privacyEnHtml).toContain("does not require account creation");
+    expect(privacyEnHtml).toContain("developer's servers");
+    expect(privacyEnHtml).toContain("third parties");
   });
 });

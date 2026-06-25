@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -53,57 +53,91 @@
       a {
         color: #8eddf5;
       }
+
+      .language-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin: 24px 0 40px;
+      }
+
+      .language-links a {
+        border: 1px solid rgba(142, 221, 245, 0.32);
+        border-radius: 999px;
+        padding: 10px 14px;
+        text-decoration: none;
+      }
+
+      section + section {
+        border-top: 1px solid rgba(232, 244, 255, 0.16);
+        margin-top: 48px;
+        padding-top: 32px;
+      }
     </style>
   </head>
   <body>
     <main>
       <h1>Hidden Line Privacy Policy</h1>
       <p><strong>Effective date:</strong> 2026-06-26</p>
-
       <p>
-        Hidden Line is a precision tracing game. This policy describes the
-        current Google Play build prepared from this repository.
+        This page provides the Korean and English privacy policies for Hidden
+        Line.
       </p>
 
-      <h2>Account and identity</h2>
-      <p>
-        Hidden Line does not currently require account creation, login, or a
-        social profile to play.
-      </p>
+      <nav class="language-links" aria-label="Privacy policy languages">
+        <a href="./privacy-ko.html">한국어 개인정보처리방침</a>
+        <a href="./privacy-en.html">English Privacy Policy</a>
+      </nav>
 
-      <h2>Game progress and settings</h2>
-      <p>
-        The current build stores play records, difficulty choices, language
-        preference, and local practice state on the device. These records are
-        used to show daily progress and improve the play experience.
-      </p>
+      <section lang="ko">
+        <h2>한국어</h2>
+        <p>
+          Hidden Line은 정밀한 선 따라가기 게임입니다. 현재 Google Play
+          테스트 빌드는 계정 생성, 로그인, 광고, 인앱결제, 온라인 랭킹,
+          사용자 대상 AI 기능을 제공하지 않습니다.
+        </p>
+        <p>
+          게임 기록, 난이도 선택, 언어 설정, 연습 상태는 사용자의 기기에
+          로컬로 저장됩니다. 이 정보는 오늘의 기록, 주간 기록, 게임 진행 상태를
+          보여주기 위해 사용되며 현재 빌드에서는 개발자 서버나 제3자에게
+          전송되지 않습니다.
+        </p>
+        <p>
+          향후 계정 동기화, 온라인 랭킹, 광고, 인앱결제, 분석, AI 코칭 기능을
+          추가하는 경우, 해당 기능을 배포하기 전에 개인정보처리방침과 Google
+          Play 데이터 보안 답변을 업데이트합니다.
+        </p>
+        <p>
+          자세한 한국어 전문은
+          <a href="./privacy-ko.html">privacy-ko.html</a>에서 확인할 수
+          있습니다.
+        </p>
+      </section>
 
-      <h2>Network, backend, and AI</h2>
-      <p>
-        The app project has backend and AI integration boundaries prepared for
-        future versions, but this current build does not enable account sync,
-        server ranking, payment entitlement checks, or user-facing AI features.
-        If those features are enabled later, this policy and the Google Play
-        Data Safety answers must be updated before release.
-      </p>
-
-      <h2>Ads and purchases</h2>
-      <p>
-        The current build does not include advertising SDKs or in-app purchases.
-      </p>
-
-      <h2>Children</h2>
-      <p>
-        Hidden Line is not intentionally directed to children. If future store
-        positioning changes, the content rating and privacy disclosures must be
-        reviewed again.
-      </p>
-
-      <h2>Contact</h2>
-      <p>
-        For privacy questions, contact the app owner through the support contact
-        listed in the Google Play store listing.
-      </p>
+      <section lang="en">
+        <h2>English</h2>
+        <p>
+          Hidden Line is a precision tracing game. The current Google Play test
+          build does not provide account creation, login, advertising, in-app
+          purchases, online rankings, or user-facing AI features.
+        </p>
+        <p>
+          Game records, difficulty choices, language preference, and practice
+          state are stored locally on the user's device. They are used to show
+          daily progress, weekly records, and gameplay state. In the current
+          build, this information is not transmitted to the developer's servers
+          or to third parties.
+        </p>
+        <p>
+          If future versions enable account sync, online rankings, advertising,
+          in-app purchases, analytics, or AI coaching, this privacy policy and
+          the Google Play Data Safety answers will be updated before release.
+        </p>
+        <p>
+          The full English version is available at
+          <a href="./privacy-en.html">privacy-en.html</a>.
+        </p>
+      </section>
     </main>
   </body>
 </html>

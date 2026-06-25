@@ -9,7 +9,7 @@
     "build:google-play:web": "VITE_TARGET=google-play npm run build",
     "cap:sync:android": "npm run build:google-play:web && npx cap sync android",
     "android:open": "npx cap open android",
-    "android:bundle:release": "npm run cap:sync:android && cd android && ./gradlew bundleRelease",
+    "android:bundle:release": "npm run cap:sync:android && cd android && JAVA_HOME=${JAVA_HOME:-/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home} ANDROID_HOME=${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools} ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-/opt/homebrew/share/android-commandlinetools} ./gradlew bundleRelease",
     "preview": "vite preview --host 127.0.0.1",
     "test": "NODE_NO_WARNINGS=1 vitest run",
     "test:watch": "NODE_NO_WARNINGS=1 vitest",

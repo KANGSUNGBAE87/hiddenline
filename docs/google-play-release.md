@@ -1,7 +1,7 @@
 # Hidden Line Google Play Release Prep
 
 Updated: 2026-06-26
-Status: packaging scaffold prepared; final AAB build is blocked on local Android toolchain setup.
+Status: signed Google Play AAB generated locally.
 
 ## App Identity
 
@@ -10,6 +10,7 @@ Status: packaging scaffold prepared; final AAB build is blocked on local Android
 - Platform shell: Capacitor Android
 - Target SDK: 35+
 - Current generated SDK values: `compileSdkVersion = 36`, `targetSdkVersion = 36`
+- Android version: `versionName = 0.1.0`, `versionCode = 1`
 - First release target: Google Play, while preserving Apps in Toss compatibility.
 
 ## Build Commands
@@ -20,33 +21,48 @@ npm run cap:sync:android
 npm run android:bundle:release
 ```
 
-Expected Android App Bundle after a successful signed release build:
+Android App Bundle after a successful signed release build:
 
 ```text
 android/app/build/outputs/bundle/release/app-release.aab
 ```
 
-Current local blocker:
+Stable local copy for Play Console upload:
 
-- This Mac currently has no Java Runtime / Android SDK available to Gradle, so
-  the repository can be scaffolded and synced, but a final `.aab` cannot be
-  produced here until JDK + Android SDK are installed.
+```text
+release-artifacts/google-play/hiddenline-0.1.0-vc1-google-play-release-signed.aab
+```
+
+SHA-256:
+
+```text
+efaeadfc15dc8ae20b1658566d25d55c5ff17952e1bbd522588835da91ae3221
+```
+
+Local toolchain used:
+
+- JDK: Homebrew `openjdk@21`
+- Android SDK: `/opt/homebrew/share/android-commandlinetools`
+- Gradle wrapper: `android/gradlew`
 
 ## Signing
 
 Google Play requires a signed Android App Bundle.
 
 - Use Google Play App Signing in Play Console.
-- Create and protect a local upload key.
+- Local upload key was generated at `android/app/hiddenline-upload.jks`.
+- Local signing properties were generated at `android/keystore.properties`.
 - Do not commit keystores, passwords, or `keystore.properties`.
 - `.gitignore` excludes `*.jks`, `*.keystore`, `keystore.properties`, and
   `android/app/release/`.
+- The upload key and `keystore.properties` must be backed up securely before the
+  first Play Console upload. Do not print or share the passwords.
 
 Owner-gated before upload:
 
 - Google Play developer account access
 - App creation in Play Console
-- Upload key generation
+- Upload key backup / Play Console enrollment
 - App signing enrollment / confirmation
 - Release track selection
 - Final `.aab` upload
@@ -74,6 +90,10 @@ Before production release:
   AI features are enabled.
 - Publish a hosted privacy policy URL. The repository draft is
   `public/privacy.html`.
+- Hosted privacy policy after GitHub Pages deploy:
+  - Korean/English index: `https://kangsungbae87.github.io/hiddenline/privacy.html`
+  - Korean: `https://kangsungbae87.github.io/hiddenline/privacy-ko.html`
+  - English: `https://kangsungbae87.github.io/hiddenline/privacy-en.html`
 
 ## Store Listing Draft
 
@@ -134,9 +154,10 @@ behind adapters.
 - [x] Release bundle script exists.
 - [x] Keystore and release artifacts are ignored by git.
 - [x] Privacy policy draft exists.
-- [ ] Install JDK and Android SDK.
-- [ ] Configure local upload signing.
-- [ ] Generate signed Android App Bundle.
+- [x] Use JDK 21 and Android SDK for local release build.
+- [x] Configure local upload signing.
+- [x] Generate signed Android App Bundle.
+- [x] Verify AAB signature.
 - [ ] Run physical Android device QA.
 - [ ] Complete Play Console Data Safety.
 - [ ] Complete Play Console content rating.
@@ -154,7 +175,7 @@ npm run build:google-play:web
 npm run cap:sync:android
 ```
 
-Blocked:
+Previously blocked:
 
 ```bash
 cd android && ./gradlew bundleRelease
@@ -166,13 +187,36 @@ Result:
 Unable to locate a Java Runtime.
 ```
 
-Next local setup required before producing the final `.aab`:
+Resolved in signed build pass:
 
-- Install JDK.
-- Install Android Studio / Android SDK.
-- Configure Android SDK path.
-- Configure upload signing.
-- Re-run `npm run android:bundle:release`.
+- JDK 21 was selected through the release script default.
+- Android SDK path was set locally through `android/local.properties`.
+- Upload signing was configured through ignored local files.
+- `npm run android:bundle:release` now produces the signed AAB.
+
+## Verification - 2026-06-26 Signed Build
+
+Passed:
+
+```bash
+npm test -- tests/release/googlePlayReadiness.test.ts --run
+npm run android:bundle:release
+jarsigner -verify android/app/build/outputs/bundle/release/app-release.aab
+```
+
+Result:
+
+```text
+jar verified.
+```
+
+Generated files:
+
+```text
+android/app/build/outputs/bundle/release/app-release.aab
+release-artifacts/google-play/hiddenline-0.1.0-vc1-google-play-release-signed.aab
+release-artifacts/google-play/hiddenline-0.1.0-vc1-google-play-release-signed.aab.sha256
+```
 
 ## Official References
 
