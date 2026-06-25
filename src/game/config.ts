@@ -193,7 +193,7 @@ export const VISIBILITY_DEFAULTS = {
   activeBacktrackT: 0.024,
   passedTrailT: 0.064,
   forwardPreviewT: 0.014,
-  forwardPreviewRenderMultiplier: 2,
+  forwardPreviewRenderMultiplier: 4,
   pathStrokeWidth: 2.8,
   revealedPathOpacity: 0.86,
   hiddenPathOpacity: 0,

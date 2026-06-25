@@ -8,6 +8,17 @@ test-results/
 .vite/
 npm-debug.log*
 *.tsbuildinfo
+android/.gradle/
+android/**/build/
+android/app/release/
+*.jks
+*.keystore
+keystore.properties
+.env
+.env.local
+.env.*.local
+.env.server.local
+supabase/.temp/
 .agents/
 .claude/
 .codex/

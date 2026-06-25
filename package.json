@@ -6,16 +6,23 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && vite build",
+    "build:google-play:web": "VITE_TARGET=google-play npm run build",
+    "cap:sync:android": "npm run build:google-play:web && npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:bundle:release": "npm run cap:sync:android && cd android && ./gradlew bundleRelease",
     "preview": "vite preview --host 127.0.0.1",
     "test": "NODE_NO_WARNINGS=1 vitest run",
     "test:watch": "NODE_NO_WARNINGS=1 vitest",
     "e2e": "NODE_NO_WARNINGS=1 FORCE_COLOR=0 playwright test"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
     "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
